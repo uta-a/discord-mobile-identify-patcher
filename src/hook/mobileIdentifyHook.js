@@ -326,6 +326,12 @@ function browserInstallMobileIdentifyHook(globalObject) {
 
   function log(event, details) {
     try {
+      const payload = {
+        event,
+        details: details || {}
+      };
+
+      globalObject.console?.info?.("[MobileIdentifyPatcher] " + JSON.stringify(payload));
       globalObject.postMessage?.({
         source: "mobile-identify-patcher",
         event,

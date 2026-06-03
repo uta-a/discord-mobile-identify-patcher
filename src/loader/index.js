@@ -58,6 +58,16 @@ function attachRendererInjection(window, hookSource) {
     const webContents = window.webContents;
     if (!webContents || webContents.isDestroyed()) return;
 
+    webContents.on("console-message", (_event, _level, message) => {
+      const prefix = "[MobileIdentifyPatcher] ";
+      if (!message.startsWith(prefix)) return;
+
+      writeDiagnostic(null, "renderer-console-diagnostic", {
+        url: safeGetWebContentsUrl(webContents),
+        message: message.slice(prefix.length)
+      });
+    });
+
     let attempts = 0;
     let completed = false;
 
