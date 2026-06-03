@@ -33,30 +33,37 @@ function patchWebSocketSend(WebSocketCtor) {
   });
 
   proto.send = function patchedSend(data) {
-    if (typeof data === "string" && data.includes('"op":2')) {
-      try {
-        const payload = JSON.parse(data);
-
-        if (payload?.op === 2 && payload.d?.properties) {
-          const nextPayload = {
-            ...payload,
-            d: {
-              ...payload.d,
-              properties: createAndroidProperties(payload.d.properties)
-            }
-          };
-
-          return originalSend.call(this, JSON.stringify(nextPayload));
-        }
-      } catch {
-        // Preserve native behavior for non-JSON strings.
-      }
-    }
-
-    return originalSend.call(this, data);
+    const patchedData = patchIdentifyPayload(data);
+    return originalSend.call(this, patchedData);
   };
 
   return true;
+}
+
+function patchIdentifyPayload(data) {
+  if (typeof data !== "string") {
+    return data;
+  }
+
+  try {
+    const payload = JSON.parse(data);
+
+    if (payload?.op === 2 && payload.d?.properties) {
+      const nextPayload = {
+        ...payload,
+        d: {
+          ...payload.d,
+          properties: createAndroidProperties(payload.d.properties)
+        }
+      };
+
+      return JSON.stringify(nextPayload);
+    }
+  } catch {
+    // Preserve native behavior for non-JSON strings.
+  }
+
+  return data;
 }
 
 function installMobileIdentifyHook(globalObject = globalThis) {
@@ -65,8 +72,83 @@ function installMobileIdentifyHook(globalObject = globalThis) {
   return patchWebSocketSend(globalObject.WebSocket);
 }
 
+function createBrowserHookSource() {
+  return `;(${browserInstallMobileIdentifyHook.toString()})(globalThis);`;
+}
+
+function browserInstallMobileIdentifyHook(globalObject) {
+  const marker = Symbol.for("MobileIdentifyPatcher.websocketSend");
+  const androidProperties = {
+    os: "Android",
+    browser: "Discord Android",
+    device: "Discord Android",
+    browser_user_agent:
+      "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
+    browser_version: "125.0.0.0",
+    os_version: "14"
+  };
+
+  if (globalObject[marker]) return false;
+  globalObject[marker] = true;
+
+  function createAndroidProperties(original) {
+    return {
+      ...(original || {}),
+      ...androidProperties
+    };
+  }
+
+  function patchIdentifyPayload(data) {
+    if (typeof data !== "string") return data;
+
+    try {
+      const payload = JSON.parse(data);
+
+      if (payload && payload.op === 2 && payload.d && payload.d.properties) {
+        return JSON.stringify({
+          ...payload,
+          d: {
+            ...payload.d,
+            properties: createAndroidProperties(payload.d.properties)
+          }
+        });
+      }
+    } catch {
+      // Preserve native behavior for non-JSON strings.
+    }
+
+    return data;
+  }
+
+  function patchWebSocketCtor(WebSocketCtor) {
+    if (typeof WebSocketCtor !== "function") return false;
+
+    const proto = WebSocketCtor.prototype;
+    if (!proto || typeof proto.send !== "function") return false;
+    if (proto[marker]) return false;
+
+    const originalSend = proto.send;
+    Object.defineProperty(proto, marker, {
+      value: true,
+      configurable: false,
+      enumerable: false,
+      writable: false
+    });
+
+    proto.send = function patchedSend(data) {
+      return originalSend.call(this, patchIdentifyPayload(data));
+    };
+
+    return true;
+  }
+
+  return patchWebSocketCtor(globalObject.WebSocket);
+}
+
 module.exports = {
+  createBrowserHookSource,
   createAndroidProperties,
   installMobileIdentifyHook,
+  patchIdentifyPayload,
   patchWebSocketSend
 };

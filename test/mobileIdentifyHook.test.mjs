@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { createAndroidProperties, patchWebSocketSend } = require("../src/hook/mobileIdentifyHook.js");
+const { createAndroidProperties, createBrowserHookSource, patchIdentifyPayload, patchWebSocketSend } = require("../src/hook/mobileIdentifyHook.js");
 
 test("createAndroidProperties overwrites mobile fields and preserves unknown fields", () => {
   const result = createAndroidProperties({
@@ -46,6 +46,19 @@ test("patchWebSocketSend rewrites op 2 IDENTIFY payload properties", () => {
   assert.equal(payload.d.properties.custom, "kept");
 });
 
+test("patchIdentifyPayload rewrites formatted op 2 IDENTIFY payload", () => {
+  const patched = patchIdentifyPayload(JSON.stringify({
+    op: 2,
+    d: {
+      properties: {
+        browser: "Discord Client"
+      }
+    }
+  }, null, 2));
+
+  assert.equal(JSON.parse(patched).d.properties.browser, "Discord Android");
+});
+
 test("patchWebSocketSend leaves non-IDENTIFY and non-JSON data unchanged", () => {
   const sent = [];
   class FakeWebSocket {
@@ -67,4 +80,27 @@ test("patchWebSocketSend leaves non-IDENTIFY and non-JSON data unchanged", () =>
   assert.equal(sent[0], heartbeat);
   assert.equal(sent[1], "not json {\"op\":2");
   assert.equal(sent[2], binary);
+});
+
+test("createBrowserHookSource creates executable main-world hook source", () => {
+  const sent = [];
+  class FakeWebSocket {
+    send(data) {
+      sent.push(data);
+    }
+  }
+  const fakeGlobal = { WebSocket: FakeWebSocket };
+  Function("globalThis", createBrowserHookSource())(fakeGlobal);
+
+  const socket = new FakeWebSocket();
+  socket.send(JSON.stringify({
+    op: 2,
+    d: {
+      properties: {
+        browser: "Discord Client"
+      }
+    }
+  }));
+
+  assert.equal(JSON.parse(sent[0]).d.properties.browser, "Discord Android");
 });
