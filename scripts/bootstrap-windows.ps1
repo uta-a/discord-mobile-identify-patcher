@@ -29,6 +29,7 @@ $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("discord-mobile-identif
 $archivePath = Join-Path $tempRoot "source.zip"
 $extractPath = Join-Path $tempRoot "source"
 $archiveUrl = "https://github.com/uta-a/discord-mobile-identify-patcher/archive/refs/heads/$Ref.zip"
+$previousLocation = Get-Location
 
 try {
   New-Item -ItemType Directory -Path $tempRoot | Out-Null
@@ -42,6 +43,8 @@ try {
 
   & (Join-Path $repoRoot.FullName "scripts\install-windows.ps1") -Branch $Branch
 } finally {
+  Set-Location $previousLocation
+
   if (Test-Path -LiteralPath $tempRoot) {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force
   }
