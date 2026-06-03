@@ -64,6 +64,12 @@ export async function installToResources(resourcesDir, { skipProcessCheck = fals
       }
     }
 
+    if (error?.code === "EBUSY") {
+      throw new Error(
+        `app.asar is locked and could not be renamed. Close Discord completely, wait a few seconds, then retry. Original error: ${error.message}`
+      );
+    }
+
     throw error;
   }
 }

@@ -7,18 +7,24 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
-Set-Location $repoRoot
+$previousLocation = Get-Location
 
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  throw "Node.js was not found in PATH. Install Node.js, then run this script again."
-}
+try {
+  Set-Location $repoRoot
 
-if (-not (Test-Path (Join-Path $repoRoot "node_modules"))) {
-  if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-    throw "npm was not found in PATH. Install Node.js with npm, then run this script again."
+  if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    throw "Node.js was not found in PATH. Install Node.js, then run this script again."
   }
 
-  npm install
-}
+  if (-not (Test-Path (Join-Path $repoRoot "node_modules"))) {
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+      throw "npm was not found in PATH. Install Node.js with npm, then run this script again."
+    }
 
-node src/cli.mjs install --branch $Branch
+    npm install
+  }
+
+  node src/cli.mjs install --branch $Branch
+} finally {
+  Set-Location $previousLocation
+}

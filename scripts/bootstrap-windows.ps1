@@ -25,6 +25,24 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
   throw "npm was not found in PATH. Install Node.js with npm, then run this script again."
 }
 
+function Remove-TempDirectory {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  for ($attempt = 1; $attempt -le 5; $attempt++) {
+    try {
+      Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+      return
+    } catch {
+      Start-Sleep -Milliseconds (250 * $attempt)
+    }
+  }
+
+  Write-Warning "Could not delete temporary directory: $Path"
+}
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("discord-mobile-identify-patcher-" + [guid]::NewGuid().ToString())
 $archivePath = Join-Path $tempRoot "source.zip"
 $extractPath = Join-Path $tempRoot "source"
@@ -46,6 +64,6 @@ try {
   Set-Location $previousLocation
 
   if (Test-Path -LiteralPath $tempRoot) {
-    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+    Remove-TempDirectory -Path $tempRoot
   }
 }
