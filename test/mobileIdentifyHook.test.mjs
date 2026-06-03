@@ -104,3 +104,27 @@ test("createBrowserHookSource creates executable main-world hook source", () => 
 
   assert.equal(JSON.parse(sent[0]).d.properties.browser, "Discord Android");
 });
+
+test("createBrowserHookSource patches GatewaySocket webpack factory", () => {
+  const fakeGlobal = { webpackChunkdiscord_app: [] };
+  Function("globalThis", createBrowserHookSource())(fakeGlobal);
+
+  const modules = {
+    123: function(module) {
+      const p = { browser: "Discord Client" };
+      module.exports = {
+        name: "GatewaySocket",
+        _doIdentify() {
+          return { properties: p, presence: {} };
+        }
+      };
+    }
+  };
+
+  fakeGlobal.webpackChunkdiscord_app.push([[123], modules]);
+
+  const module = { exports: null };
+  modules[123](module);
+
+  assert.equal(module.exports._doIdentify().properties.browser, "Discord Android");
+});
