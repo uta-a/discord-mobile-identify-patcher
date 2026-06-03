@@ -90,10 +90,14 @@ function browserInstallMobileIdentifyHook(globalObject) {
     os_version: "14"
   };
 
+  log("main-world-hook-started");
   installFastConnectBlock();
   installWebpackIdentifyPatch();
 
-  if (globalObject[marker]) return false;
+  if (globalObject[marker]) {
+    log("websocket-send-hook-skipped", { reason: "already-installed" });
+    return false;
+  }
   globalObject[marker] = true;
 
   function createAndroidProperties(original) {
@@ -110,6 +114,9 @@ function browserInstallMobileIdentifyHook(globalObject) {
       const payload = JSON.parse(data);
 
       if (payload && payload.op === 2 && payload.d && payload.d.properties) {
+        log("identify-json-patched", {
+          previousBrowser: payload.d.properties.browser || null
+        });
         return JSON.stringify({
           ...payload,
           d: {
@@ -129,8 +136,14 @@ function browserInstallMobileIdentifyHook(globalObject) {
     if (typeof WebSocketCtor !== "function") return false;
 
     const proto = WebSocketCtor.prototype;
-    if (!proto || typeof proto.send !== "function") return false;
-    if (proto[marker]) return false;
+    if (!proto || typeof proto.send !== "function") {
+      log("websocket-send-hook-skipped", { reason: "missing-send" });
+      return false;
+    }
+    if (proto[marker]) {
+      log("websocket-send-hook-skipped", { reason: "prototype-already-patched" });
+      return false;
+    }
 
     const originalSend = proto.send;
     Object.defineProperty(proto, marker, {
@@ -144,21 +157,29 @@ function browserInstallMobileIdentifyHook(globalObject) {
       return originalSend.call(this, patchIdentifyPayload(data));
     };
 
+    log("websocket-send-hook-installed");
     return true;
   }
 
   function installFastConnectBlock() {
-    if (globalObject[fastConnectMarker]) return false;
+    if (globalObject[fastConnectMarker]) {
+      log("fast-connect-block-skipped", { reason: "already-installed" });
+      return false;
+    }
     globalObject[fastConnectMarker] = true;
 
     const NativeWebSocket = globalObject.WebSocket;
-    if (typeof NativeWebSocket !== "function") return false;
+    if (typeof NativeWebSocket !== "function") {
+      log("fast-connect-block-skipped", { reason: "missing-websocket" });
+      return false;
+    }
 
     let blocked = false;
     globalObject.WebSocket = new Proxy(NativeWebSocket, {
       construct(target, args, newTarget) {
         if (shouldBlockFastConnect(args[0])) {
           blocked = true;
+          log("fast-connect-blocked", { url: String(args[0]) });
           args[0] = "ws://127.0.0.1:9";
         }
 
@@ -174,15 +195,22 @@ function browserInstallMobileIdentifyHook(globalObject) {
         && url.includes("compress=zstd-stream");
     }
 
+    log("fast-connect-block-installed");
     return true;
   }
 
   function installWebpackIdentifyPatch() {
-    if (globalObject[webpackMarker]) return false;
+    if (globalObject[webpackMarker]) {
+      log("webpack-patch-skipped", { reason: "already-installed" });
+      return false;
+    }
     globalObject[webpackMarker] = true;
 
     patchKnownWebpackChunkArrays();
     patchFutureWebpackChunkArrays();
+    log("webpack-patch-installed", {
+      chunkKeys: Object.keys(globalObject).filter(isWebpackChunkKey)
+    });
     return true;
   }
 
@@ -237,6 +265,7 @@ function browserInstallMobileIdentifyHook(globalObject) {
       return originalPush.apply(this, chunks);
     };
 
+    log("webpack-chunk-array-patched", { existingChunks: chunkArray.length });
     return true;
   }
 
@@ -252,6 +281,7 @@ function browserInstallMobileIdentifyHook(globalObject) {
       if (patchedFactory !== factory) {
         modules[moduleId] = patchedFactory;
         patched = true;
+        log("webpack-factory-patched", { moduleId: String(moduleId) });
       }
     }
 
@@ -264,6 +294,11 @@ function browserInstallMobileIdentifyHook(globalObject) {
       return factory;
     }
 
+    log("gateway-factory-candidate", {
+      moduleId: String(moduleId),
+      sourceLength: source.length,
+      hasPropertiesPresence: /properties:\s*[A-Za-z_$][\w$]*\s*,\s*presence:/.test(source)
+    });
     const replacement = '{os:"Android",browser:"Discord Android",device:"Discord Android",browser_user_agent:"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",browser_version:"125.0.0.0",os_version:"14"}';
     const matchers = [
       /(?<=properties:\s*)([A-Za-z_$][\w$]*)(?=\s*,\s*presence:)/
@@ -275,16 +310,31 @@ function browserInstallMobileIdentifyHook(globalObject) {
       const patchedSource = `${source.replace(matcher, replacement)}
 //# sourceURL=file:///MobileIdentifyPatchedWebpackModule${String(moduleId)}`;
       try {
+        log("gateway-factory-source-patched", { moduleId: String(moduleId), matcher: String(matcher) });
         return (0, eval)(`(${patchedSource}\n)`);
-      } catch {
+      } catch (error) {
+        log("gateway-factory-eval-error", { moduleId: String(moduleId), message: error?.message ?? String(error) });
         return factory;
       }
     }
 
+    log("gateway-factory-no-matcher", { moduleId: String(moduleId) });
     return factory;
   }
 
   return patchWebSocketCtor(globalObject.WebSocket);
+
+  function log(event, details) {
+    try {
+      globalObject.postMessage?.({
+        source: "mobile-identify-patcher",
+        event,
+        details: details || {}
+      }, "*");
+    } catch {
+      // Ignore diagnostics failures in page context.
+    }
+  }
 }
 
 module.exports = {
