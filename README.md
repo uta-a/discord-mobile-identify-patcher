@@ -19,6 +19,32 @@ No uninstall, GUI, or automatic updater is included.
 
 Close Discord completely before running these scripts. The installer auto-detects the Discord resources path for the selected branch and then installs the loader.
 
+No-clone install. These commands download the latest project archive into a temporary directory, run the installer, then delete the temporary files.
+
+Windows PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-windows.ps1 | iex"
+```
+
+macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-macos.sh | bash
+```
+
+Pass `canary` or `ptb` when needed:
+
+```powershell
+$env:DMI_BRANCH = "canary"; powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-windows.ps1 | iex"; Remove-Item Env:\DMI_BRANCH
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-macos.sh | bash -s -- canary
+```
+
+Local checkout install:
+
 Windows PowerShell:
 
 ```powershell
