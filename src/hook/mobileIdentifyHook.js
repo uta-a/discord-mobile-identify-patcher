@@ -346,6 +346,8 @@ function browserInstallMobileIdentifyHook(globalObject) {
       hasFactories: Boolean(webpackRequire.m)
     });
 
+    patchWebpackRuntimeFactories(webpackRequire);
+
     for (const moduleId of moduleIds) {
       const moduleExports = moduleCache[moduleId]?.exports;
       candidates += inspectExportValue(moduleExports, {
@@ -358,6 +360,68 @@ function browserInstallMobileIdentifyHook(globalObject) {
 
     log("webpack-runtime-scan-complete", { candidates });
     return true;
+  }
+
+  function patchWebpackRuntimeFactories(webpackRequire) {
+    const factories = webpackRequire.m;
+    if (!factories || typeof factories !== "object") {
+      log("webpack-factory-scan-skipped", { reason: "missing-factory-map" });
+      return false;
+    }
+
+    let scanned = 0;
+    let interesting = 0;
+    let patched = 0;
+    const interestingSamples = [];
+
+    for (const [moduleId, factory] of Object.entries(factories)) {
+      if (typeof factory !== "function") continue;
+
+      scanned += 1;
+      const source = Function.prototype.toString.call(factory);
+      const hints = getFactoryHints(source);
+      if (hints.length > 0) {
+        interesting += 1;
+        if (interestingSamples.length < 20) {
+          interestingSamples.push({
+            moduleId: String(moduleId),
+            hints,
+            sourceLength: source.length,
+            snippet: source.slice(0, 300)
+          });
+        }
+      }
+
+      const patchedFactory = patchGatewayIdentifyFactory(factory, moduleId);
+      if (patchedFactory !== factory) {
+        factories[moduleId] = patchedFactory;
+        patched += 1;
+      }
+    }
+
+    log("webpack-factory-scan-complete", {
+      scanned,
+      interesting,
+      patched,
+      interestingSamples
+    });
+
+    return patched > 0;
+  }
+
+  function getFactoryHints(source) {
+    const hints = [];
+
+    if (source.includes("GatewaySocket")) hints.push("GatewaySocket");
+    if (source.includes("_doIdentify")) hints.push("_doIdentify");
+    if (source.includes("IDENTIFY")) hints.push("IDENTIFY");
+    if (source.includes("identify")) hints.push("identify");
+    if (source.includes("properties")) hints.push("properties");
+    if (source.includes("presence")) hints.push("presence");
+    if (source.includes("encoding=etf")) hints.push("encoding=etf");
+    if (source.includes("gateway.discord.gg")) hints.push("gateway.discord.gg");
+
+    return hints;
   }
 
   function findWebpackChunkArray() {
