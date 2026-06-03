@@ -74,6 +74,73 @@ export async function assertDiscordNotRunning(resourcesDir) {
   }
 }
 
+export async function closeDiscordForInstall(resourcesDir, { waitMs = 5000 } = {}) {
+  const processes = await findRunningDiscordProcesses();
+  const relevant = processes.filter((processInfo) => isDiscordProcessRelevant(processInfo, resourcesDir));
+
+  if (relevant.length === 0) {
+    return { closed: false, processes: [] };
+  }
+
+  await terminateProcesses(relevant);
+  await waitForProcessesToExit(relevant, waitMs);
+
+  return {
+    closed: true,
+    processes: relevant.map((processInfo) => ({
+      id: processInfo.Id,
+      name: processInfo.ProcessName
+    }))
+  };
+}
+
+async function terminateProcesses(processes, { platform = process.platform } = {}) {
+  const ids = processes
+    .map((processInfo) => Number(processInfo.Id))
+    .filter((id) => Number.isInteger(id) && id > 0);
+
+  if (ids.length === 0) return;
+
+  if (platform === "win32") {
+    await execFileAsync("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      `Stop-Process -Id ${ids.join(",")} -Force -ErrorAction SilentlyContinue`
+    ]);
+    return;
+  }
+
+  if (platform === "darwin") {
+    try {
+      await execFileAsync("kill", ids.map(String));
+    } catch {
+      await execFileAsync("kill", ["-9", ...ids.map(String)]);
+    }
+  }
+}
+
+async function waitForProcessesToExit(originalProcesses, waitMs) {
+  const deadline = Date.now() + waitMs;
+  const originalIds = new Set(originalProcesses.map((processInfo) => Number(processInfo.Id)));
+
+  while (Date.now() < deadline) {
+    const running = await findRunningDiscordProcesses();
+    const stillRunning = running.some((processInfo) => originalIds.has(Number(processInfo.Id)));
+
+    if (!stillRunning) {
+      return;
+    }
+
+    await sleep(250);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function parsePowerShellProcessJson(stdout) {
   const trimmed = stdout.trim();
   if (!trimmed) return [];

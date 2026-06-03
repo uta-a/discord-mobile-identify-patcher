@@ -24,7 +24,7 @@ try {
     npm install
   }
 
-  node src/cli.mjs install --branch $Branch
+  node src/cli.mjs install --branch $Branch --force-close
 } finally {
   Set-Location $previousLocation
 }

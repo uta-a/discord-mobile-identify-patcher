@@ -4,10 +4,15 @@ import { buildLoaderAsar } from "./buildLoaderAsar.mjs";
 import { evaluateInstallState, isOurLoader } from "./guard.mjs";
 import { getAppAsarPath, getBackupAsarPath } from "../utils/asarPaths.mjs";
 import { sha256File } from "../utils/hash.mjs";
-import { assertDiscordNotRunning } from "./processGuard.mjs";
+import { assertDiscordNotRunning, closeDiscordForInstall } from "./processGuard.mjs";
 
-export async function installToResources(resourcesDir, { skipProcessCheck = false } = {}) {
-  if (!skipProcessCheck) {
+export async function installToResources(resourcesDir, { forceClose = false, skipProcessCheck = false } = {}) {
+  let closedProcesses = [];
+
+  if (forceClose) {
+    const closeResult = await closeDiscordForInstall(resourcesDir);
+    closedProcesses = closeResult.processes;
+  } else if (!skipProcessCheck) {
     await assertDiscordNotRunning(resourcesDir);
   }
 
@@ -36,9 +41,9 @@ export async function installToResources(resourcesDir, { skipProcessCheck = fals
 
   let renamedOriginal = false;
   try {
-    await fs.rename(appAsar, backupAsar);
+    await renameWithBusyRetry(appAsar, backupAsar);
     renamedOriginal = true;
-    await fs.rename(tempLoaderAsar, appAsar);
+    await renameWithBusyRetry(tempLoaderAsar, appAsar);
 
     if (!(await isOurLoader(appAsar))) {
       throw new Error(
@@ -51,6 +56,7 @@ export async function installToResources(resourcesDir, { skipProcessCheck = fals
       alreadyInstalled: false,
       appAsar,
       backupAsar,
+      closedProcesses,
       originalHash
     };
   } catch (error) {
@@ -72,4 +78,33 @@ export async function installToResources(resourcesDir, { skipProcessCheck = fals
 
     throw error;
   }
+}
+
+async function renameWithBusyRetry(from, to, { attempts = 12, delayMs = 500 } = {}) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await fs.rename(from, to);
+      return;
+    } catch (error) {
+      lastError = error;
+
+      if (error?.code !== "EBUSY" && error?.code !== "EPERM") {
+        throw error;
+      }
+
+      if (attempt < attempts) {
+        await sleep(delayMs);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

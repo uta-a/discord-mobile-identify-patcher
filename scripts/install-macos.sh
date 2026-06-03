@@ -28,4 +28,4 @@ if [ ! -d "$repo_root/node_modules" ]; then
   npm install
 fi
 
-node src/cli.mjs install --branch "$branch"
+node src/cli.mjs install --branch "$branch" --force-close

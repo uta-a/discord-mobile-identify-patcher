@@ -24,13 +24,13 @@ async function main(argv) {
     return;
   }
 
-  const result = await installToResources(resourcesDir);
+  const result = await installToResources(resourcesDir, { forceClose: options.forceClose });
   console.log(JSON.stringify(result, null, 2));
 }
 
 function parseArgs(argv) {
   const [command = "check", ...rest] = argv;
-  const options = { branch: "stable", discordPath: null };
+  const options = { branch: "stable", discordPath: null, forceClose: false };
 
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
@@ -44,6 +44,11 @@ function parseArgs(argv) {
     if (arg === "--discord-path") {
       options.discordPath = requireValue(rest, index, arg);
       index += 1;
+      continue;
+    }
+
+    if (arg === "--force-close") {
+      options.forceClose = true;
       continue;
     }
 
@@ -64,7 +69,7 @@ function requireValue(args, index, option) {
 function printUsage() {
   console.log(`Usage:
   node src/cli.mjs check [--branch stable|canary|ptb] [--discord-path <resources>]
-  node src/cli.mjs install [--branch stable|canary|ptb] [--discord-path <resources>]`);
+  node src/cli.mjs install [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close]`);
 }
 
 main(process.argv.slice(2)).catch((error) => {

@@ -17,7 +17,7 @@ No uninstall, GUI, or automatic updater is included.
 
 ## One-Step Install
 
-Close Discord completely before running these scripts. The installer auto-detects the Discord resources path for the selected branch and then installs the loader.
+The installer auto-detects the Discord resources path for the selected branch, closes the matching Discord process if it is running, then installs the loader.
 
 No-clone install. These commands download the latest project archive into a temporary directory, run the installer, then delete the temporary files.
 
@@ -84,7 +84,7 @@ If you omit `--discord-path`, the CLI searches common Discord locations for the 
 node src/cli.mjs check --branch stable
 node src/cli.mjs check --branch canary
 node src/cli.mjs check --branch ptb
-node src/cli.mjs install --branch stable
+node src/cli.mjs install --branch stable --force-close
 ```
 
 ## Safety Rules
@@ -94,6 +94,7 @@ node src/cli.mjs install --branch stable
 - `_app.asar` and other existing patcher backup files are not touched.
 - If `app.asar` is already this loader, install is treated as already complete.
 - If backup exists but `app.asar` is not this loader, install aborts to avoid destroying the previous layer.
+- The one-step scripts pass `--force-close`, so matching Discord processes are terminated before `app.asar` is renamed.
 
 ## Development
 
