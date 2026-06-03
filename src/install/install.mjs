@@ -106,7 +106,7 @@ async function repairExistingInstall(resourcesDir, { closedProcesses, state }) {
   }
 
   try {
-    await fs.rm(appAsar, { force: true });
+    await removeWithBusyRetry(appAsar);
     await renameWithBusyRetry(tempLoaderAsar, appAsar);
 
     if (!(await isOurLoader(appAsar))) {
@@ -135,6 +135,29 @@ async function renameWithBusyRetry(from, to, { attempts = 12, delayMs = 500 } = 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       await fs.rename(from, to);
+      return;
+    } catch (error) {
+      lastError = error;
+
+      if (error?.code !== "EBUSY" && error?.code !== "EPERM") {
+        throw error;
+      }
+
+      if (attempt < attempts) {
+        await sleep(delayMs);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+async function removeWithBusyRetry(filePath, { attempts = 12, delayMs = 500 } = {}) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await fs.rm(filePath, { force: true });
       return;
     } catch (error) {
       lastError = error;
