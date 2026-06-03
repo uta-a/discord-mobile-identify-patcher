@@ -208,6 +208,8 @@ function browserInstallMobileIdentifyHook(globalObject) {
 
     patchKnownWebpackChunkArrays();
     patchFutureWebpackChunkArrays();
+    setTimeout(() => inspectWebpackRuntime(), 1000);
+    setTimeout(() => inspectWebpackRuntime(), 5000);
     log("webpack-patch-installed", {
       chunkKeys: Object.keys(globalObject).filter(isWebpackChunkKey)
     });
@@ -320,6 +322,148 @@ function browserInstallMobileIdentifyHook(globalObject) {
 
     log("gateway-factory-no-matcher", { moduleId: String(moduleId) });
     return factory;
+  }
+
+  function inspectWebpackRuntime() {
+    const chunkArray = findWebpackChunkArray();
+    if (!chunkArray) {
+      log("webpack-runtime-scan-skipped", { reason: "chunk-array-not-found" });
+      return false;
+    }
+
+    const webpackRequire = captureWebpackRequire(chunkArray);
+    if (!webpackRequire) {
+      log("webpack-runtime-scan-skipped", { reason: "require-not-captured" });
+      return false;
+    }
+
+    const moduleCache = webpackRequire.c || {};
+    const moduleIds = Object.keys(moduleCache);
+    let candidates = 0;
+
+    log("webpack-runtime-captured", {
+      moduleCount: moduleIds.length,
+      hasFactories: Boolean(webpackRequire.m)
+    });
+
+    for (const moduleId of moduleIds) {
+      const moduleExports = moduleCache[moduleId]?.exports;
+      candidates += inspectExportValue(moduleExports, {
+        moduleId,
+        path: "exports",
+        depth: 0,
+        seen: new Set()
+      });
+    }
+
+    log("webpack-runtime-scan-complete", { candidates });
+    return true;
+  }
+
+  function findWebpackChunkArray() {
+    for (const key of Object.keys(globalObject)) {
+      if (isWebpackChunkKey(key) && Array.isArray(globalObject[key])) {
+        return globalObject[key];
+      }
+    }
+
+    return null;
+  }
+
+  function captureWebpackRequire(chunkArray) {
+    let webpackRequire = null;
+    const chunkId = `mobile-identify-runtime-${Date.now()}-${Math.random()}`;
+
+    try {
+      chunkArray.push([[chunkId], {}, (require) => {
+        webpackRequire = require;
+      }]);
+    } catch (error) {
+      log("webpack-require-capture-error", { message: error?.message || String(error) });
+    }
+
+    return webpackRequire;
+  }
+
+  function inspectExportValue(value, context) {
+    if (value == null) return 0;
+    if ((typeof value !== "object" && typeof value !== "function") || context.seen.has(value)) return 0;
+    context.seen.add(value);
+
+    let candidates = 0;
+    const ownKeys = getInspectableKeys(value);
+
+    if (hasIdentifyShape(value, ownKeys)) {
+      candidates += 1;
+      log("runtime-identify-candidate", {
+        moduleId: context.moduleId,
+        path: context.path,
+        keys: ownKeys.slice(0, 30),
+        type: typeof value,
+        identifySourceHint: getFunctionHint(value._doIdentify || value.doIdentify || value.identify)
+      });
+    }
+
+    const prototype = typeof value === "function" ? value.prototype : null;
+    if (prototype && !context.seen.has(prototype)) {
+      candidates += inspectExportValue(prototype, {
+        ...context,
+        path: `${context.path}.prototype`,
+        depth: context.depth + 1
+      });
+    }
+
+    if (context.depth >= 3) return candidates;
+
+    for (const key of ownKeys) {
+      if (key === "constructor") continue;
+
+      try {
+        candidates += inspectExportValue(value[key], {
+          ...context,
+          path: `${context.path}.${key}`,
+          depth: context.depth + 1
+        });
+      } catch {
+        // Ignore getters with side effects.
+      }
+    }
+
+    return candidates;
+  }
+
+  function getInspectableKeys(value) {
+    try {
+      return Object.getOwnPropertyNames(value).filter((key) => key !== "__esModule");
+    } catch {
+      return [];
+    }
+  }
+
+  function hasIdentifyShape(value, keys) {
+    if (keys.includes("_doIdentify") || keys.includes("doIdentify") || keys.includes("identify")) {
+      return true;
+    }
+
+    if (typeof value === "function") {
+      const source = Function.prototype.toString.call(value);
+      return source.includes("GatewaySocket") || source.includes("_doIdentify");
+    }
+
+    return false;
+  }
+
+  function getFunctionHint(value) {
+    if (typeof value !== "function") return null;
+
+    const source = Function.prototype.toString.call(value);
+    return {
+      length: source.length,
+      includesProperties: source.includes("properties"),
+      includesPresence: source.includes("presence"),
+      includesSend: source.includes("send"),
+      snippet: source.slice(0, 240)
+    };
   }
 
   return patchWebSocketCtor(globalObject.WebSocket);
