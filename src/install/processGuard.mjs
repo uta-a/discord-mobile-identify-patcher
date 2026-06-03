@@ -102,11 +102,16 @@ async function terminateProcesses(processes, { platform = process.platform } = {
   if (ids.length === 0) return;
 
   if (platform === "win32") {
-    await execFileAsync("powershell.exe", [
-      "-NoProfile",
-      "-Command",
-      `Stop-Process -Id ${ids.join(",")} -Force -ErrorAction SilentlyContinue`
-    ]);
+    try {
+      await execFileAsync("powershell.exe", [
+        "-NoProfile",
+        "-Command",
+        `Stop-Process -Id ${ids.join(",")} -Force -ErrorAction SilentlyContinue`
+      ]);
+    } catch {
+      // Processes can exit between detection and termination. The follow-up wait
+      // checks the actual remaining process list, so a Stop-Process race is safe.
+    }
     return;
   }
 
