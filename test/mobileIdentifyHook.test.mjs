@@ -3,7 +3,8 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { createAndroidProperties, createBrowserHookSource, patchIdentifyPayload, patchWebSocketSend } = require("../src/hook/mobileIdentifyHook.js");
+const { decodeEtf, encodeEtf } = require("../src/hook/etf.js");
+const { createAndroidProperties, createBrowserHookSource, patchEtfIdentifyPayload, patchIdentifyPayload, patchWebSocketSend } = require("../src/hook/mobileIdentifyHook.js");
 
 test("createAndroidProperties overwrites mobile fields and preserves unknown fields", () => {
   const result = createAndroidProperties({
@@ -57,6 +58,44 @@ test("patchIdentifyPayload rewrites formatted op 2 IDENTIFY payload", () => {
   }, null, 2));
 
   assert.equal(JSON.parse(patched).d.properties.browser, "Discord Android");
+});
+
+test("patchEtfIdentifyPayload rewrites op 2 IDENTIFY ETF payload", () => {
+  const original = {
+    op: 2,
+    d: {
+      properties: {
+        os: "Windows",
+        browser: "Discord Client",
+        custom: "kept"
+      },
+      presence: {}
+    }
+  };
+  const encoded = encodeEtf(original);
+
+  const result = patchEtfIdentifyPayload(encoded);
+
+  assert.equal(result.patched, true);
+  const decoded = decodeEtf(result.patchedData);
+  assert.equal(decoded.d.properties.os, "Android");
+  assert.equal(decoded.d.properties.browser, "Discord Android");
+  assert.equal(decoded.d.properties.custom, "kept");
+});
+
+test("patchIdentifyPayload rewrites typed array ETF payload", () => {
+  const encoded = encodeEtf({
+    op: 2,
+    d: {
+      properties: {
+        browser: "Discord Client"
+      }
+    }
+  });
+
+  const decoded = decodeEtf(patchIdentifyPayload(encoded));
+
+  assert.equal(decoded.d.properties.browser, "Discord Android");
 });
 
 test("patchWebSocketSend leaves non-IDENTIFY and non-JSON data unchanged", () => {
