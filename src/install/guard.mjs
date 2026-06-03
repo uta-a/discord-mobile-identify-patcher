@@ -12,6 +12,7 @@ export async function readMarker(appAsarPath) {
       return JSON.parse(marker);
     }
 
+    asar.uncache(appAsarPath);
     const marker = asar.extractFile(appAsarPath, "marker.json").toString("utf8");
     return JSON.parse(marker);
   } catch {
