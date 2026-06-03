@@ -7,7 +7,7 @@ This project is experimental. Modifying Discord's client files may violate Disco
 ## MVP Scope
 
 - Manual install against a Discord `resources` directory.
-- Backup the current `app.asar` by renaming it to `app.asar.mobile-status-backup`.
+- Backup the current `app.asar` by renaming it to `app.mobile-status-backup.asar`.
 - Place this patcher's loader as the new `app.asar`.
 - Preserve existing patcher layers such as Vencord by loading the backed-up app as the next layer.
 - Prevent double install using `marker.json`.
@@ -90,7 +90,7 @@ node src/cli.mjs install --branch stable --force-close
 ## Safety Rules
 
 - Existing `app.asar` is moved with `rename`, not copied and deleted.
-- `app.asar.mobile-status-backup` is never overwritten.
+- `app.mobile-status-backup.asar` is never overwritten.
 - `_app.asar` and other existing patcher backup files are not touched.
 - If `app.asar` is already this loader, install is treated as already complete.
 - If backup exists but `app.asar` is not this loader, install aborts to avoid destroying the previous layer.

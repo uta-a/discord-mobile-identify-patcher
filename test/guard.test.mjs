@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { BACKUP_ASAR_NAME } from "../src/config.mjs";
 import { buildLoaderAsar } from "../src/install/buildLoaderAsar.mjs";
 import { evaluateInstallState, isOurLoader } from "../src/install/guard.mjs";
 
@@ -33,7 +34,7 @@ test("evaluateInstallState treats marker app.asar as already installed", async (
 test("evaluateInstallState aborts when backup exists but app.asar is not our loader", async () => {
   await usingFixture(async (resourcesDir) => {
     await fs.writeFile(path.join(resourcesDir, "app.asar"), "official");
-    await fs.writeFile(path.join(resourcesDir, "app.asar.mobile-status-backup"), "previous");
+    await fs.writeFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "previous");
 
     const state = await evaluateInstallState(resourcesDir);
 

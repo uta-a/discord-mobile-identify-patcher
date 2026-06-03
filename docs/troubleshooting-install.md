@@ -47,7 +47,7 @@ Example:
 ```text
 EBUSY: resource busy or locked, rename
 '...\resources\app.asar' ->
-'...\resources\app.asar.mobile-status-backup'
+'...\resources\app.mobile-status-backup.asar'
 ```
 
 ### Initial Assumption
@@ -122,7 +122,7 @@ resources/
   bootstrap/
 ```
 
-There was no `app.asar.mobile-status-backup`, and `app.asar` had no `marker.json`.
+There was no `app.mobile-status-backup.asar`, and `app.asar` had no `marker.json`.
 
 This showed that rollback worked and no broken backup state remained.
 

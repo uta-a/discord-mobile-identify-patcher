@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { buildLoaderAsar } from "./buildLoaderAsar.mjs";
 import { evaluateInstallState, isOurLoader } from "./guard.mjs";
-import { getAppAsarPath, getBackupAsarPath } from "../utils/asarPaths.mjs";
+import { getAppAsarPath, getBackupAsarPath, getLegacyBackupAsarPath } from "../utils/asarPaths.mjs";
 import { sha256File } from "../utils/hash.mjs";
 import { assertDiscordNotRunning, closeDiscordForInstall } from "./processGuard.mjs";
 
@@ -19,7 +19,7 @@ export async function installToResources(resourcesDir, { forceClose = false, ski
   const state = await evaluateInstallState(resourcesDir);
 
   if (state.action === "already-installed") {
-    return { installed: false, alreadyInstalled: true, state };
+    return repairExistingInstall(resourcesDir, { closedProcesses, state });
   }
 
   if (state.action !== "install") {
@@ -80,6 +80,55 @@ export async function installToResources(resourcesDir, { forceClose = false, ski
   }
 }
 
+async function repairExistingInstall(resourcesDir, { closedProcesses, state }) {
+  const appAsar = getAppAsarPath(resourcesDir);
+  const backupAsar = getBackupAsarPath(resourcesDir);
+  const legacyBackupAsar = getLegacyBackupAsarPath(resourcesDir);
+  const tempLoaderAsar = path.join(
+    resourcesDir,
+    `.app.asar.mobile-identify-loader-${process.pid}-${Date.now()}.tmp`
+  );
+
+  const backupExists = await exists(backupAsar);
+  const legacyBackupExists = await exists(legacyBackupAsar);
+
+  if (!backupExists && legacyBackupExists) {
+    await renameWithBusyRetry(legacyBackupAsar, backupAsar);
+  }
+
+  if (!(await exists(backupAsar))) {
+    return { installed: false, alreadyInstalled: true, repaired: false, closedProcesses, state };
+  }
+
+  await buildLoaderAsar(tempLoaderAsar);
+  if (!(await isOurLoader(tempLoaderAsar))) {
+    throw new Error(`built loader marker verification failed: ${tempLoaderAsar}`);
+  }
+
+  try {
+    await fs.rm(appAsar, { force: true });
+    await renameWithBusyRetry(tempLoaderAsar, appAsar);
+
+    if (!(await isOurLoader(appAsar))) {
+      throw new Error("repaired app.asar marker verification failed");
+    }
+
+    return {
+      installed: false,
+      alreadyInstalled: true,
+      repaired: true,
+      appAsar,
+      backupAsar,
+      migratedLegacyBackup: legacyBackupExists && !backupExists,
+      closedProcesses,
+      state
+    };
+  } catch (error) {
+    await fs.rm(tempLoaderAsar, { force: true });
+    throw error;
+  }
+}
+
 async function renameWithBusyRetry(from, to, { attempts = 12, delayMs = 500 } = {}) {
   let lastError = null;
 
@@ -107,4 +156,13 @@ function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function exists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }

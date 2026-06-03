@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import asar from "@electron/asar";
+import { BACKUP_ASAR_NAME, LEGACY_BACKUP_ASAR_NAME } from "../src/config.mjs";
 import { buildLoaderAsar } from "../src/install/buildLoaderAsar.mjs";
 import { installToResources } from "../src/install/install.mjs";
 import { evaluateInstallState, isOurLoader } from "../src/install/guard.mjs";
@@ -16,7 +17,7 @@ test("install renames current app.asar to backup and places loader", async () =>
 
     assert.equal(result.installed, true);
     assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
-    assert.equal(await fs.readFile(path.join(resourcesDir, "app.asar.mobile-status-backup"), "utf8"), "official");
+    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "official");
   });
 });
 
@@ -28,7 +29,7 @@ test("install does not touch _app.asar in Vencord-like resources", async () => {
     await installToResources(resourcesDir, { skipProcessCheck: true });
 
     assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
-    assert.equal(await fs.readFile(path.join(resourcesDir, "app.asar.mobile-status-backup"), "utf8"), "vencord loader");
+    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "vencord loader");
   });
 });
 
@@ -37,11 +38,31 @@ test("second install does not overwrite backup", async () => {
     await fs.writeFile(path.join(resourcesDir, "app.asar"), "official");
 
     await installToResources(resourcesDir, { skipProcessCheck: true });
-    const firstBackup = await fs.readFile(path.join(resourcesDir, "app.asar.mobile-status-backup"), "utf8");
+    const firstBackup = await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8");
     const second = await installToResources(resourcesDir, { skipProcessCheck: true });
 
     assert.equal(second.alreadyInstalled, true);
-    assert.equal(await fs.readFile(path.join(resourcesDir, "app.asar.mobile-status-backup"), "utf8"), firstBackup);
+    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), firstBackup);
+  });
+});
+
+test("already installed legacy backup is migrated and loader is repaired", async () => {
+  await usingFixture(async (resourcesDir) => {
+    const appAsar = path.join(resourcesDir, "app.asar");
+    const legacyBackupAsar = path.join(resourcesDir, LEGACY_BACKUP_ASAR_NAME);
+    const backupAsar = path.join(resourcesDir, BACKUP_ASAR_NAME);
+
+    await buildLoaderAsar(appAsar);
+    await fs.writeFile(legacyBackupAsar, "official");
+
+    const result = await installToResources(resourcesDir, { skipProcessCheck: true });
+
+    assert.equal(result.alreadyInstalled, true);
+    assert.equal(result.repaired, true);
+    assert.equal(result.migratedLegacyBackup, true);
+    assert.equal(await fs.readFile(backupAsar, "utf8"), "official");
+    assert.equal(await pathExists(legacyBackupAsar), false);
+    assert.equal(await isOurLoader(appAsar), true);
   });
 });
 
@@ -73,5 +94,14 @@ async function usingFixture(callback) {
     await callback(root);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }
