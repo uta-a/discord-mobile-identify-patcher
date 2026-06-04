@@ -41,6 +41,8 @@ DMI を外す場合:
 
 ## インストール
 
+インストーラーは検出した Discord と確認項目を表示し、上下矢印キーと Enter で選択できます。
+
 Windows PowerShell:
 
 ```powershell

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import * as readline from "node:readline";
 import { createInterface } from "node:readline/promises";
 import { stdin as processStdin, stdout as processStdout } from "node:process";
 import path from "node:path";
@@ -68,10 +69,11 @@ async function runInteractiveInstall(options) {
 
   try {
     terminal.output.write("Discord Mobile IDENTIFY Patcher\n\n");
-    const installTarget = await promptInstallTarget(rl, terminal.output, options);
+    const installTarget = await promptInstallTarget(rl, terminal, options);
 
     const forceClose = options.forceClose || await promptBoolean(
       rl,
+      terminal,
       "Close matching Discord processes before install?",
       true
     );
@@ -82,7 +84,7 @@ async function runInteractiveInstall(options) {
     terminal.output.write(`  Resources: ${installTarget.resourcesDir}\n`);
     terminal.output.write(`  Force close: ${forceClose ? "yes" : "no"}\n\n`);
 
-    const confirmed = await promptBoolean(rl, "Continue?", false);
+    const confirmed = await promptBoolean(rl, terminal, "Continue?", false);
     if (!confirmed) {
       terminal.output.write("Install cancelled.\n");
       return;
@@ -98,7 +100,9 @@ async function runInteractiveInstall(options) {
   }
 }
 
-async function promptInstallTarget(rl, output, options) {
+async function promptInstallTarget(rl, terminal, options) {
+  const { output } = terminal;
+
   if (options.discordPath) {
     const branch = options.branchProvided ? options.branch : "custom";
     return {
@@ -122,14 +126,24 @@ async function promptInstallTarget(rl, output, options) {
     };
   }
 
-  output.write("Detected Discord installs:\n");
-  candidates.forEach((candidate, index) => {
-    output.write(`  ${index + 1}. ${candidate.branch} ${candidate.version} - ${candidate.resourcesDir}\n`);
-    output.write(`     ${formatStateSummary(candidate.state)}\n`);
+  const selectedIndex = await promptSelect(terminal, {
+    label: "Select Discord install",
+    options: candidates.map((candidate) => ({
+      label: `${candidate.branch} ${candidate.version} - ${candidate.resourcesDir}`,
+      description: formatStateSummary(candidate.state)
+    })),
+    fallback: async () => {
+      output.write("Detected Discord installs:\n");
+      candidates.forEach((candidate, index) => {
+        output.write(`  ${index + 1}. ${candidate.branch} ${candidate.version} - ${candidate.resourcesDir}\n`);
+        output.write(`     ${formatStateSummary(candidate.state)}\n`);
+      });
+
+      return (await promptNumber(rl, "Select install", 1, 1, candidates.length)) - 1;
+    }
   });
 
-  const selectedIndex = await promptNumber(rl, "Select install", 1, 1, candidates.length);
-  return candidates[selectedIndex - 1];
+  return candidates[selectedIndex];
 }
 
 async function detectInstallCandidates(branches) {
@@ -201,7 +215,104 @@ async function promptNumber(rl, label, defaultValue, min, max) {
   }
 }
 
-async function promptBoolean(rl, label, defaultValue) {
+async function promptSelect({ input, output }, { label, options, fallback, initialIndex = 0 }) {
+  if (!input.isTTY || typeof input.setRawMode !== "function") {
+    return fallback();
+  }
+
+  let selectedIndex = initialIndex;
+  let renderedLines = 0;
+  const previousRawMode = Boolean(input.isRaw);
+
+  return await new Promise((resolve, reject) => {
+    const cleanup = () => {
+      input.off("keypress", onKeypress);
+      input.setRawMode(previousRawMode);
+      input.pause();
+    };
+
+    const finish = (value) => {
+      cleanup();
+      output.write("\n");
+      resolve(value);
+    };
+
+    const fail = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const render = () => {
+      if (renderedLines > 0) {
+        output.write(`\x1b[${renderedLines}A\x1b[J`);
+      }
+
+      const lines = [
+        `${label} (↑/↓, Enter)`,
+        ...options.map((option, index) => {
+          const marker = index === selectedIndex ? "›" : " ";
+          const description = option.description ? `  ${dim(option.description)}` : "";
+          return `${marker} ${option.label}${description}`;
+        })
+      ];
+
+      output.write(`${lines.join("\n")}\n`);
+      renderedLines = lines.length;
+    };
+
+    const onKeypress = (_text, key) => {
+      if (key?.name === "up" || key?.name === "k") {
+        selectedIndex = (selectedIndex - 1 + options.length) % options.length;
+        render();
+        return;
+      }
+
+      if (key?.name === "down" || key?.name === "j") {
+        selectedIndex = (selectedIndex + 1) % options.length;
+        render();
+        return;
+      }
+
+      if (key?.name === "return" || key?.name === "enter") {
+        finish(selectedIndex);
+        return;
+      }
+
+      if (key?.name === "c" && key.ctrl) {
+        fail(new Error("Interactive install cancelled."));
+      }
+    };
+
+    readline.emitKeypressEvents(input);
+    input.setRawMode(true);
+    input.resume();
+    input.on("keypress", onKeypress);
+    render();
+  });
+}
+
+function dim(value) {
+  return `\x1b[2m${value}\x1b[22m`;
+}
+
+async function promptBoolean(rl, terminal, label, defaultValue) {
+  if (terminal) {
+    const selectedIndex = await promptSelect(terminal, {
+      label,
+      initialIndex: defaultValue ? 0 : 1,
+      options: [
+        { label: "Yes", description: "" },
+        { label: "No", description: "" }
+      ],
+      fallback: () => promptBooleanLine(rl, label, defaultValue)
+    });
+    return selectedIndex === 0;
+  }
+
+  return promptBooleanLine(rl, label, defaultValue);
+}
+
+async function promptBooleanLine(rl, label, defaultValue) {
   const suffix = defaultValue ? "Y/n" : "y/N";
   while (true) {
     const answer = (await rl.question(`${label} [${suffix}]: `)).trim().toLowerCase();
