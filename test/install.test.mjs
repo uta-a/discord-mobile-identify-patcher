@@ -26,10 +26,60 @@ test("install does not touch _app.asar in Vencord-like resources", async () => {
     await fs.writeFile(path.join(resourcesDir, "app.asar"), "vencord loader");
     await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
 
-    await installToResources(resourcesDir, { skipProcessCheck: true });
+    await installToResources(resourcesDir, { skipProcessCheck: true, installMode: "preserve-existing" });
 
     assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
     assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "vencord loader");
+  });
+});
+
+test("direct-discord mode removes Vencord-like active layer and backs up Discord body", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await fs.writeFile(path.join(resourcesDir, "app.asar"), "vencord loader");
+    await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
+
+    const result = await installToResources(resourcesDir, {
+      skipProcessCheck: true,
+      installMode: "direct-discord"
+    });
+
+    assert.equal(result.installed, true);
+    assert.equal(result.installMode, "direct-discord");
+    assert.equal(result.disabledExistingLayer, true);
+    assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "official discord");
+    assert.equal(await pathExists(path.join(resourcesDir, "_app.asar")), false);
+  });
+});
+
+test("default install mode backs up Discord body from Vencord-like _app.asar", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await fs.writeFile(path.join(resourcesDir, "app.asar"), "vencord loader");
+    await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
+
+    await installToResources(resourcesDir, { skipProcessCheck: true });
+
+    assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "official discord");
+    assert.equal(await pathExists(path.join(resourcesDir, "_app.asar")), false);
+  });
+});
+
+test("direct-discord mode converts an existing preserve install without leaving Vencord layer active", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await buildLoaderAsar(path.join(resourcesDir, "app.asar"));
+    await fs.writeFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "vencord loader");
+    await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
+
+    const result = await installToResources(resourcesDir, {
+      skipProcessCheck: true,
+      installMode: "direct-discord"
+    });
+
+    assert.equal(result.installed, true);
+    assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "official discord");
+    assert.equal(await pathExists(path.join(resourcesDir, "_app.asar")), false);
   });
 });
 

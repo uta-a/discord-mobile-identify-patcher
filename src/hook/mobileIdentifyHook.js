@@ -211,6 +211,14 @@ function browserInstallMobileIdentifyHook(globalObject) {
     return writer.toUint8Array();
   }
 
+  class EtfAtom {
+    constructor(value) { this.value = value; }
+    toString() { return this.value; }
+    valueOf() { return this.value; }
+  }
+
+  const etfTuple = Symbol.for("MobileIdentifyPatcher.etfTuple");
+
   class EtfReader {
     constructor(bytes) {
       this.bytes = bytes;
@@ -223,23 +231,39 @@ function browserInstallMobileIdentifyHook(globalObject) {
     i32() { const value = this.u32(); return value > 0x7fffffff ? value - 0x100000000 : value; }
     bytesOf(length) { const value = this.bytes.slice(this.offset, this.offset + length); this.offset += length; return value; }
     text(length) { return new TextDecoder().decode(this.bytesOf(length)); }
+    atom(length) { return new EtfAtom(this.text(length)); }
 
     term() {
       const tag = this.u8();
       switch (tag) {
         case 97: return this.u8();
         case 98: return this.i32();
-        case 100: return this.text(this.u16());
+        case 100: return this.atom(this.u16());
+        case 104: return this.tuple(this.u8());
+        case 105: return this.tuple(this.u32());
         case 106: return [];
         case 107: return Array.from(this.bytesOf(this.u16()));
         case 108: return this.list(this.u32());
         case 109: return this.text(this.u32());
         case 110: return this.smallBig();
         case 116: return this.map(this.u32());
-        case 118: return this.text(this.u16());
-        case 119: return this.text(this.u8());
+        case 118: return this.atom(this.u16());
+        case 119: return this.atom(this.u8());
+        case 115: return this.atom(this.u8());
         default: throw new Error("Unsupported ETF tag: " + tag);
       }
+    }
+
+    tuple(length) {
+      const result = [];
+      for (let index = 0; index < length; index += 1) result.push(this.term());
+      Object.defineProperty(result, etfTuple, {
+        value: true,
+        configurable: false,
+        enumerable: false,
+        writable: false
+      });
+      return result;
     }
 
     list(length) {
@@ -270,6 +294,7 @@ function browserInstallMobileIdentifyHook(globalObject) {
   class EtfWriter {
     constructor() { this.bytes = []; }
     u8(value) { this.bytes.push(value & 0xff); }
+    u16(value) { this.bytes.push((value >>> 8) & 0xff, value & 0xff); }
     u32(value) { this.bytes.push((value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff); }
     raw(values) { for (const value of values) this.u8(value); }
 
@@ -277,15 +302,30 @@ function browserInstallMobileIdentifyHook(globalObject) {
       if (Number.isInteger(value) && value >= 0 && value <= 255) { this.u8(97); this.u8(value); return; }
       if (Number.isInteger(value) && value >= -2147483648 && value <= 2147483647) { this.u8(98); this.u32(value >>> 0); return; }
       if (typeof value === "bigint") { this.big(value); return; }
+      if (value instanceof EtfAtom) { this.atom(value.value); return; }
       if (typeof value === "string") { this.binary(value); return; }
+      if (Array.isArray(value) && value[etfTuple]) { this.tuple(value); return; }
       if (Array.isArray(value)) { this.list(value); return; }
       if (value && typeof value === "object") { this.map(value); return; }
       throw new Error("Cannot encode ETF value: " + String(value));
     }
 
+    atom(value) {
+      const bytes = new TextEncoder().encode(value);
+      if (bytes.length <= 255) { this.u8(119); this.u8(bytes.length); }
+      else { this.u8(118); this.u16(bytes.length); }
+      this.raw(bytes);
+    }
+
     binary(value) {
       const bytes = new TextEncoder().encode(value);
       this.u8(109); this.u32(bytes.length); this.raw(bytes);
+    }
+
+    tuple(values) {
+      if (values.length <= 255) { this.u8(104); this.u8(values.length); }
+      else { this.u8(105); this.u32(values.length); }
+      for (const value of values) this.term(value);
     }
 
     list(values) {

@@ -6,7 +6,16 @@ import { getAppAsarPath, getBackupAsarPath, getLegacyBackupAsarPath } from "../u
 import { sha256File } from "../utils/hash.mjs";
 import { assertDiscordNotRunning, closeDiscordForInstall } from "./processGuard.mjs";
 
-export async function installToResources(resourcesDir, { forceClose = false, skipProcessCheck = false } = {}) {
+const INSTALL_MODES = new Set(["preserve-existing", "direct-discord"]);
+
+export async function installToResources(
+  resourcesDir,
+  { forceClose = false, skipProcessCheck = false, installMode = "direct-discord" } = {}
+) {
+  if (!INSTALL_MODES.has(installMode)) {
+    throw new Error(`Unsupported install mode: ${installMode}`);
+  }
+
   let closedProcesses = [];
 
   if (forceClose) {
@@ -14,6 +23,10 @@ export async function installToResources(resourcesDir, { forceClose = false, ski
     closedProcesses = closeResult.processes;
   } else if (!skipProcessCheck) {
     await assertDiscordNotRunning(resourcesDir);
+  }
+
+  if (installMode === "direct-discord" && (await exists(getLegacyVencordBodyPath(resourcesDir)))) {
+    return installDirectDiscord(resourcesDir, { closedProcesses });
   }
 
   const state = await evaluateInstallState(resourcesDir);
@@ -74,6 +87,64 @@ export async function installToResources(resourcesDir, { forceClose = false, ski
       throw new Error(
         `app.asar is locked and could not be renamed. Close Discord completely, wait a few seconds, then retry. Original error: ${error.message}`
       );
+    }
+
+    throw error;
+  }
+}
+
+async function installDirectDiscord(resourcesDir, { closedProcesses }) {
+  const appAsar = getAppAsarPath(resourcesDir);
+  const backupAsar = getBackupAsarPath(resourcesDir);
+  const legacyVencordBodyAsar = getLegacyVencordBodyPath(resourcesDir);
+  const originalHash = await sha256File(legacyVencordBodyAsar);
+  const tempLoaderAsar = path.join(
+    resourcesDir,
+    `.app.asar.mobile-identify-loader-${process.pid}-${Date.now()}.tmp`
+  );
+
+  await buildLoaderAsar(tempLoaderAsar);
+  if (!(await isOurLoader(tempLoaderAsar))) {
+    throw new Error(`built loader marker verification failed: ${tempLoaderAsar}`);
+  }
+
+  let movedDiscordBody = false;
+  try {
+    await removeWithBusyRetry(backupAsar);
+    await renameWithBusyRetry(legacyVencordBodyAsar, backupAsar);
+    movedDiscordBody = true;
+    await removeWithBusyRetry(appAsar);
+    await renameWithBusyRetry(tempLoaderAsar, appAsar);
+
+    if (!(await isOurLoader(appAsar))) {
+      throw new Error("direct Discord app.asar marker verification failed");
+    }
+
+    return {
+      installed: true,
+      alreadyInstalled: false,
+      installMode: "direct-discord",
+      appAsar,
+      backupAsar,
+      disabledExistingLayer: true,
+      closedProcesses,
+      originalHash
+    };
+  } catch (error) {
+    await fs.rm(tempLoaderAsar, { force: true });
+
+    if (movedDiscordBody && !(await exists(appAsar))) {
+      try {
+        await fs.rename(backupAsar, appAsar);
+      } catch {
+        error.message = `${error.message}; rollback failed, Discord body remains at ${backupAsar}`;
+      }
+    } else if (movedDiscordBody && !(await exists(legacyVencordBodyAsar))) {
+      try {
+        await fs.rename(backupAsar, legacyVencordBodyAsar);
+      } catch {
+        error.message = `${error.message}; rollback failed, Discord body remains at ${backupAsar}`;
+      }
     }
 
     throw error;
@@ -179,6 +250,10 @@ function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function getLegacyVencordBodyPath(resourcesDir) {
+  return path.join(resourcesDir, "_app.asar");
 }
 
 async function exists(filePath) {

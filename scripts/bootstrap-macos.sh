@@ -3,11 +3,20 @@ set -euo pipefail
 
 branch="${1:-${DMI_BRANCH:-stable}}"
 ref="${DMI_REF:-main}"
+install_mode="${DMI_INSTALL_MODE:-direct-discord}"
 
 case "$branch" in
   stable|canary|ptb) ;;
   *)
     echo "Usage: $0 [stable|canary|ptb]" >&2
+    exit 2
+    ;;
+esac
+
+case "$install_mode" in
+  preserve-existing|direct-discord) ;;
+  *)
+    echo "DMI_INSTALL_MODE must be preserve-existing or direct-discord" >&2
     exit 2
     ;;
 esac
@@ -42,4 +51,4 @@ if [ -z "$repo_root" ]; then
   exit 1
 fi
 
-bash "$repo_root/scripts/install-macos.sh" "$branch"
+DMI_INSTALL_MODE="$install_mode" bash "$repo_root/scripts/install-macos.sh" "$branch"

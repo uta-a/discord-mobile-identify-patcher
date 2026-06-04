@@ -1,4 +1,19 @@
 const ETF_VERSION = 131;
+const ETF_TUPLE = Symbol.for("MobileIdentifyPatcher.etfTuple");
+
+class EtfAtom {
+  constructor(value) {
+    this.value = value;
+  }
+
+  toString() {
+    return this.value;
+  }
+
+  valueOf() {
+    return this.value;
+  }
+}
 
 function decodeEtf(input) {
   const bytes = toUint8Array(input);
@@ -72,7 +87,11 @@ class EtfReader {
       case 98:
         return this.i32();
       case 100:
-        return this.text(this.u16());
+        return this.atom(this.u16());
+      case 104:
+        return this.tuple(this.u8());
+      case 105:
+        return this.tuple(this.u32());
       case 107:
         return Array.from(this.bytesOf(this.u16()));
       case 106:
@@ -86,12 +105,33 @@ class EtfReader {
       case 116:
         return this.map(this.u32());
       case 118:
-        return this.text(this.u16());
+        return this.atom(this.u16());
       case 119:
-        return this.text(this.u8());
+        return this.atom(this.u8());
+      case 115:
+        return this.atom(this.u8());
       default:
         throw new Error(`Unsupported ETF tag: ${tag}`);
     }
+  }
+
+  atom(length) {
+    return new EtfAtom(this.text(length));
+  }
+
+  tuple(length) {
+    const result = [];
+    for (let index = 0; index < length; index += 1) {
+      result.push(this.term());
+    }
+
+    Object.defineProperty(result, ETF_TUPLE, {
+      value: true,
+      configurable: false,
+      enumerable: false,
+      writable: false
+    });
+    return result;
   }
 
   list(length) {
@@ -177,8 +217,18 @@ class EtfWriter {
       return;
     }
 
+    if (value instanceof EtfAtom) {
+      this.atom(value.value);
+      return;
+    }
+
     if (typeof value === "string") {
       this.binary(value);
+      return;
+    }
+
+    if (Array.isArray(value) && value[ETF_TUPLE]) {
+      this.tuple(value);
       return;
     }
 
@@ -193,6 +243,32 @@ class EtfWriter {
     }
 
     throw new Error(`Cannot encode ETF value: ${String(value)}`);
+  }
+
+  tuple(values) {
+    if (values.length <= 255) {
+      this.u8(104);
+      this.u8(values.length);
+    } else {
+      this.u8(105);
+      this.u32(values.length);
+    }
+
+    for (const value of values) {
+      this.term(value);
+    }
+  }
+
+  atom(value) {
+    const bytes = new TextEncoder().encode(value);
+    if (bytes.length <= 255) {
+      this.u8(119);
+      this.u8(bytes.length);
+    } else {
+      this.u8(118);
+      this.u16(bytes.length);
+    }
+    this.raw(bytes);
   }
 
   binary(value) {

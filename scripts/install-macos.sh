@@ -2,10 +2,19 @@
 set -euo pipefail
 
 branch="${1:-stable}"
+install_mode="${DMI_INSTALL_MODE:-direct-discord}"
 case "$branch" in
   stable|canary|ptb) ;;
   *)
     echo "Usage: $0 [stable|canary|ptb]" >&2
+    exit 2
+    ;;
+esac
+
+case "$install_mode" in
+  preserve-existing|direct-discord) ;;
+  *)
+    echo "DMI_INSTALL_MODE must be preserve-existing or direct-discord" >&2
     exit 2
     ;;
 esac
@@ -28,4 +37,9 @@ if [ ! -d "$repo_root/node_modules" ]; then
   npm install
 fi
 
-node src/cli.mjs install --branch "$branch" --force-close
+interactive_args=()
+if [ "${DMI_NONINTERACTIVE:-0}" != "1" ]; then
+  interactive_args+=(--interactive)
+fi
+
+node src/cli.mjs install --branch "$branch" --force-close --install-mode "$install_mode" "${interactive_args[@]}"

@@ -83,6 +83,31 @@ test("patchEtfIdentifyPayload rewrites op 2 IDENTIFY ETF payload", () => {
   assert.equal(decoded.d.properties.custom, "kept");
 });
 
+test("patchEtfIdentifyPayload preserves ETF small atoms while rewriting IDENTIFY", () => {
+  const encoded = new Uint8Array([
+    131,
+    116, 0, 0, 0, 2,
+      109, 0, 0, 0, 2, 111, 112,
+      97, 2,
+      109, 0, 0, 0, 1, 100,
+      116, 0, 0, 0, 2,
+        109, 0, 0, 0, 10, 112, 114, 111, 112, 101, 114, 116, 105, 101, 115,
+        116, 0, 0, 0, 1,
+          109, 0, 0, 0, 7, 98, 114, 111, 119, 115, 101, 114,
+          109, 0, 0, 0, 14, 68, 105, 115, 99, 111, 114, 100, 32, 67, 108, 105, 101, 110, 116,
+        109, 0, 0, 0, 6, 115, 116, 97, 116, 117, 115,
+        115, 6, 111, 110, 108, 105, 110, 101
+  ]);
+
+  const result = patchEtfIdentifyPayload(encoded);
+
+  assert.equal(result.patched, true);
+  assert.deepEqual(Array.from(result.patchedData).slice(-8), [119, 6, 111, 110, 108, 105, 110, 101]);
+  const decoded = decodeEtf(result.patchedData);
+  assert.equal(decoded.d.properties.browser, "Discord Android");
+  assert.equal(String(decoded.d.status), "online");
+});
+
 test("patchIdentifyPayload rewrites typed array ETF payload", () => {
   const encoded = encodeEtf({
     op: 2,

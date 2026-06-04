@@ -52,10 +52,10 @@ export function isDiscordProcessRelevant(processInfo, resourcesDir) {
     return true;
   }
 
-  const normalizedProcessPath = path.normalize(processInfo.Path).toLowerCase();
-  const normalizedResourcesDir = path.normalize(resourcesDir).toLowerCase();
-  const installRoot = normalizedResourcesDir.endsWith(`${path.sep}resources`)
-    ? path.dirname(normalizedResourcesDir)
+  const normalizedProcessPath = normalizeComparablePath(processInfo.Path);
+  const normalizedResourcesDir = normalizeComparablePath(resourcesDir);
+  const installRoot = normalizedResourcesDir.endsWith("/resources")
+    ? normalizedResourcesDir.slice(0, -"/resources".length)
     : normalizedResourcesDir;
 
   const appBundleRoot = getMacAppBundleRoot(normalizedResourcesDir);
@@ -170,8 +170,12 @@ function parseMacProcessLine(line) {
   };
 }
 
+function normalizeComparablePath(filePath) {
+  return path.normalize(filePath).replace(/\\/g, "/").toLowerCase();
+}
+
 function getMacAppBundleRoot(normalizedResourcesDir) {
-  const marker = `${path.sep}contents${path.sep}resources`;
+  const marker = "/contents/resources";
   const markerIndex = normalizedResourcesDir.indexOf(marker);
   if (markerIndex === -1) return normalizedResourcesDir;
   return normalizedResourcesDir.slice(0, markerIndex);

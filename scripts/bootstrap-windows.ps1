@@ -1,6 +1,7 @@
 param(
   [string]$Branch = $env:DMI_BRANCH,
-  [string]$Ref = $env:DMI_REF
+  [string]$Ref = $env:DMI_REF,
+  [string]$InstallMode = $env:DMI_INSTALL_MODE
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,14 @@ if (@("stable", "canary", "ptb") -notcontains $Branch) {
 
 if ([string]::IsNullOrWhiteSpace($Ref)) {
   $Ref = "main"
+}
+
+if ([string]::IsNullOrWhiteSpace($InstallMode)) {
+  $InstallMode = "direct-discord"
+}
+
+if (@("preserve-existing", "direct-discord") -notcontains $InstallMode) {
+  throw "Invalid install mode '$InstallMode'. Use preserve-existing or direct-discord."
 }
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -59,7 +68,7 @@ try {
     throw "Downloaded archive did not contain a project directory."
   }
 
-  & (Join-Path $repoRoot.FullName "scripts\install-windows.ps1") -Branch $Branch
+  & (Join-Path $repoRoot.FullName "scripts\install-windows.ps1") -Branch $Branch -InstallMode $InstallMode
 } finally {
   Set-Location $previousLocation
 
