@@ -2,25 +2,11 @@
 set -euo pipefail
 
 branch="${1:-stable}"
-target="${DMI_UNINSTALL_TARGET:-self}"
 
 case "$branch" in
   stable|canary|ptb) ;;
   *)
     echo "Usage: $0 [stable|canary|ptb]" >&2
-    exit 2
-    ;;
-esac
-
-case "$target" in
-  self)
-    command="uninstall-self"
-    ;;
-  vencord-layer)
-    command="uninstall-vencord-layer"
-    ;;
-  *)
-    echo "DMI_UNINSTALL_TARGET must be self or vencord-layer" >&2
     exit 2
     ;;
 esac
@@ -43,4 +29,4 @@ if [ ! -d "$repo_root/node_modules" ]; then
   npm install
 fi
 
-node src/cli.mjs "$command" --branch "$branch" --force-close
+node src/cli.mjs uninstall --branch "$branch" --force-close

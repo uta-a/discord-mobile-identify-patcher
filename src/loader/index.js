@@ -1,17 +1,15 @@
 const path = require("path");
 const electron = require("electron");
 const { createBrowserHookSource } = require("./mobileIdentifyHook.js");
-const { getNextAppPlan, loadNextApp, patchBrowserWindowPreload } = require("./core.js");
+const { loadNextApp, patchBrowserWindowPreload } = require("./core.js");
 
 const resourcesDir = process.resourcesPath;
-const { nextAsar, shouldPatch } = getNextAppPlan(resourcesDir, __dirname);
+const nextAsar = path.join(resourcesDir, "_app.asar");
 const ownPreload = path.join(__dirname, "preload.js");
 
-if (shouldPatch) {
-  setupDiagnostics(electron);
-  setupRendererInjection(electron, createBrowserHookSource());
-  patchBrowserWindowPreload(electron, ownPreload);
-}
+setupDiagnostics(electron);
+setupRendererInjection(electron, createBrowserHookSource());
+patchBrowserWindowPreload(electron, ownPreload);
 loadNextApp(nextAsar);
 
 function setupDiagnostics(electronModule) {

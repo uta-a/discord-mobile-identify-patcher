@@ -43,8 +43,8 @@ test("README documents one-step install and uninstall commands", async () => {
   assert.match(readme, /bootstrap-macos\.sh/);
   assert.match(readme, /bootstrap-uninstall-windows\.ps1/);
   assert.match(readme, /bootstrap-uninstall-macos\.sh/);
-  assert.match(readme, /DMI_UNINSTALL_TARGET = "vencord-layer"/);
-  assert.match(readme, /DMI_UNINSTALL_TARGET=vencord-layer bash/);
+  assert.match(readme, /DMI stands for Discord Mobile Identify/);
+  assert.match(readme, /Vencord uninstall/);
 });
 
 test("CLI help exits successfully", async () => {
@@ -53,5 +53,6 @@ test("CLI help exits successfully", async () => {
   });
 
   assert.match(stdout, /node src\/cli\.mjs install/);
-  assert.match(stdout, /node src\/cli\.mjs uninstall-self/);
+  assert.match(stdout, /node src\/cli\.mjs uninstall/);
+  assert.match(stdout, /node src\/cli\.mjs doctor/);
 });

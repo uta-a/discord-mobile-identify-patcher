@@ -8,7 +8,6 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const {
   createCombinedPreload,
-  getNextAppPlan,
   loadNextApp,
   patchBrowserWindowPreload,
   withChainedPreload
@@ -76,40 +75,6 @@ test("loadNextApp requires the next layer package main", async () => {
     const result = loadNextApp(root);
 
     assert.deepEqual(result, { loaded: true });
-  });
-});
-
-test("getNextAppPlan keeps mobile patch when Vencord moved this loader to _app.asar", async () => {
-  await usingFixture(async (root) => {
-    await fs.writeFile(path.join(root, "app.dmi.asar"), "official fallback");
-
-    const plan = getNextAppPlan(root, path.join(root, "_app.asar"));
-
-    assert.equal(plan.shouldPatch, true);
-    assert.equal(plan.nextAsar, path.join(root, "app.dmi.asar"));
-  });
-});
-
-test("getNextAppPlan uses app.dmi.asar when active mobile loader has no _app.asar", async () => {
-  await usingFixture(async (root) => {
-    await fs.writeFile(path.join(root, "app.dmi.asar"), "official fallback");
-
-    const plan = getNextAppPlan(root, path.join(root, "app.asar"));
-
-    assert.equal(plan.shouldPatch, true);
-    assert.equal(plan.nextAsar, path.join(root, "app.dmi.asar"));
-  });
-});
-
-test("getNextAppPlan keeps mobile patch first when app.vc.asar exists", async () => {
-  await usingFixture(async (root) => {
-    await fs.writeFile(path.join(root, "app.vc.asar"), "vencord loader");
-    await fs.writeFile(path.join(root, "_app.asar"), "official body");
-
-    const plan = getNextAppPlan(root, path.join(root, "app.asar"));
-
-    assert.equal(plan.shouldPatch, true);
-    assert.equal(plan.nextAsar, path.join(root, "app.vc.asar"));
   });
 });
 

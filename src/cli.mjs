@@ -7,8 +7,7 @@ import { findDiscordResourcesPath, getCandidateResourcesPaths } from "./detect/p
 import { evaluateInstallState } from "./install/guard.mjs";
 import {
   installToResources,
-  uninstallSelfFromResources,
-  uninstallVencordLayerFromResources
+  uninstallSelfFromResources
 } from "./install/install.mjs";
 import { pathExists } from "./utils/fileOps.mjs";
 
@@ -20,7 +19,7 @@ async function main(argv) {
 
   const { command, options } = parseArgs(argv);
 
-  if (!["check", "install", "uninstall-self", "uninstall-vencord-layer"].includes(command)) {
+  if (!["check", "doctor", "install", "uninstall"].includes(command)) {
     printUsage();
     process.exitCode = 1;
     return;
@@ -36,7 +35,7 @@ async function main(argv) {
     throw new Error("Discord resources path was not found. Pass --discord-path explicitly.");
   }
 
-  if (command === "check") {
+  if (command === "check" || command === "doctor") {
     const state = await evaluateInstallState(resourcesDir);
     console.log(JSON.stringify({ branch: options.branch, version: getInstallVersion(resourcesDir), resourcesDir, ...state }, null, 2));
     process.exitCode = state.action === "abort" ? 1 : 0;
@@ -45,26 +44,18 @@ async function main(argv) {
 
   if (command === "install") {
     const result = await installToResources(resourcesDir, {
-      forceClose: options.forceClose,
-      installMode: options.installMode
+      forceClose: options.forceClose
     });
     console.log(JSON.stringify(withInstallMetadata(result, resourcesDir, options.branch), null, 2));
     return;
   }
 
-  if (command === "uninstall-self") {
+  if (command === "uninstall") {
     const result = await uninstallSelfFromResources(resourcesDir, {
       forceClose: options.forceClose
     });
     console.log(JSON.stringify(withInstallMetadata(result, resourcesDir, options.branch), null, 2));
     return;
-  }
-
-  if (command === "uninstall-vencord-layer") {
-    const result = await uninstallVencordLayerFromResources(resourcesDir, {
-      forceClose: options.forceClose
-    });
-    console.log(JSON.stringify(withInstallMetadata(result, resourcesDir, options.branch), null, 2));
   }
 }
 
@@ -78,9 +69,6 @@ async function runInteractiveInstall(options) {
   try {
     terminal.output.write("Discord Mobile IDENTIFY Patcher\n\n");
     const installTarget = await promptInstallTarget(rl, terminal.output, options);
-    const installMode = options.installModeProvided
-      ? options.installMode
-      : await promptInstallMode(rl, terminal.output, installTarget);
 
     const forceClose = options.forceClose || await promptBoolean(
       rl,
@@ -92,7 +80,6 @@ async function runInteractiveInstall(options) {
     terminal.output.write(`  Branch: ${installTarget.branch}\n`);
     terminal.output.write(`  Version: ${installTarget.version}\n`);
     terminal.output.write(`  Resources: ${installTarget.resourcesDir}\n`);
-    terminal.output.write(`  Mode: ${installMode}\n`);
     terminal.output.write(`  Force close: ${forceClose ? "yes" : "no"}\n\n`);
 
     const confirmed = await promptBoolean(rl, "Continue?", false);
@@ -102,8 +89,7 @@ async function runInteractiveInstall(options) {
     }
 
     const result = await installToResources(installTarget.resourcesDir, {
-      forceClose,
-      installMode
+      forceClose
     });
     terminal.output.write(`${JSON.stringify(withInstallMetadata(result, installTarget.resourcesDir, installTarget.branch), null, 2)}\n`);
   } finally {
@@ -188,30 +174,14 @@ async function describeResources(resourcesDir) {
 
 function formatStateSummary(state) {
   const parts = [];
-  if (state.alreadyInstalled) parts.push("mobile patcher: installed");
-  else parts.push("mobile patcher: not installed");
+  if (state.alreadyInstalled) parts.push("DMI patcher: installed");
+  else parts.push("DMI patcher: not installed");
 
   if (state.backupExists) parts.push("backup: exists");
   else parts.push("backup: none");
 
   if (state.hasVencordStyleBody) parts.push("Vencord-style _app.asar: detected");
   return parts.join(", ");
-}
-
-async function promptInstallMode(rl, output, installTarget) {
-  output.write("\nInstall mode:\n");
-  output.write("  1. auto (recommended) - preserve Vencord via app.vc.asar when _app.asar exists\n");
-  output.write("  2. direct-discord - disable active Vencord-like loader layer\n");
-  output.write("  3. preserve-existing - compatibility alias for preserving the existing layer\n");
-
-  if (installTarget.state.hasVencordStyleBody) {
-    output.write("\nVencord-style _app.asar was detected. auto will move app.asar to app.vc.asar and keep _app.asar as the Discord body.\n");
-  }
-
-  const selected = await promptNumber(rl, "Select mode", 1, 1, 3);
-  if (selected === 2) return "direct-discord";
-  if (selected === 3) return "preserve-existing";
-  return "auto";
 }
 
 async function promptRequired(rl, label) {
@@ -275,8 +245,6 @@ function parseArgs(argv) {
     branchProvided: false,
     discordPath: null,
     forceClose: false,
-    installMode: process.env.DMI_INSTALL_MODE || "auto",
-    installModeProvided: Boolean(process.env.DMI_INSTALL_MODE),
     interactive: false
   };
 
@@ -298,13 +266,6 @@ function parseArgs(argv) {
 
     if (arg === "--force-close") {
       options.forceClose = true;
-      continue;
-    }
-
-    if (arg === "--install-mode") {
-      options.installMode = requireValue(rest, index, arg);
-      options.installModeProvided = true;
-      index += 1;
       continue;
     }
 
@@ -330,9 +291,9 @@ function requireValue(args, index, option) {
 function printUsage() {
   console.log(`Usage:
   node src/cli.mjs check [--branch stable|canary|ptb] [--discord-path <resources>]
-  node src/cli.mjs install [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close] [--install-mode auto|preserve-existing|direct-discord] [--interactive]
-  node src/cli.mjs uninstall-self [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close]
-  node src/cli.mjs uninstall-vencord-layer [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close]`);
+  node src/cli.mjs doctor [--branch stable|canary|ptb] [--discord-path <resources>]
+  node src/cli.mjs install [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close] [--interactive]
+  node src/cli.mjs uninstall [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close]`);
 }
 
 main(process.argv.slice(2)).catch((error) => {

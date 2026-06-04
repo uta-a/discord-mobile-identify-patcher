@@ -1,128 +1,140 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { buildLoaderAsar } from "./buildLoaderAsar.mjs";
-import { evaluateInstallState, isOurLoader } from "./guard.mjs";
+import {
+  BACKUP_ASAR_NAME,
+  DIRECT_PATCH_MODE,
+  DISPLAY_NAME,
+  MARKER_JSON_NAME,
+  PATCHER_NAME,
+  VERSION
+} from "../config.mjs";
+import { buildPatchedDiscordAsar } from "./directPatch.mjs";
+import { evaluateInstallState } from "./guard.mjs";
 import {
   getAppAsarPath,
   getBackupAsarPath,
-  getDiscordBodyAsarPath,
-  getVencordLoaderAsarPath
+  getMarkerJsonPath
 } from "../utils/asarPaths.mjs";
 import { sha256File } from "../utils/hash.mjs";
 import { assertDiscordNotRunning, closeDiscordForInstall } from "./processGuard.mjs";
 
-const INSTALL_MODES = new Set(["auto", "preserve-existing", "direct-discord"]);
-
 export async function installToResources(
   resourcesDir,
-  { forceClose = false, skipProcessCheck = false, installMode = "auto" } = {}
+  { forceClose = false, skipProcessCheck = false } = {}
 ) {
-  if (!INSTALL_MODES.has(installMode)) {
-    throw new Error(`Unsupported install mode: ${installMode}`);
-  }
-
-  let closedProcesses = [];
-
-  if (forceClose) {
-    const closeResult = await closeDiscordForInstall(resourcesDir);
-    closedProcesses = closeResult.processes;
-  } else if (!skipProcessCheck) {
-    await assertDiscordNotRunning(resourcesDir);
-  }
-
+  const closedProcesses = await prepareForAsarChanges(resourcesDir, { forceClose, skipProcessCheck });
   const state = await evaluateInstallState(resourcesDir);
 
-  if (installMode === "direct-discord") {
-    return installDirectDiscordMode(resourcesDir, { closedProcesses, state });
-  }
-
-  if ((installMode === "auto" || installMode === "preserve-existing")
-    && (await exists(getDiscordBodyAsarPath(resourcesDir)))) {
-    return installVencordChain(resourcesDir, { closedProcesses, installMode: "vencord-chain" });
-  }
-
-  if (state.action === "already-installed") {
-    return repairExistingInstall(resourcesDir, { closedProcesses, state });
+  if (state.state === "dmi-only") {
+    return { installed: false, alreadyInstalled: true, repaired: false, state, closedProcesses };
   }
 
   if (state.action !== "install") {
-    throw new Error(state.reason ?? "install guard failed");
+    throw new Error(state.reason ?? `DMI install is not supported for state: ${state.state}`);
   }
 
   return installFreshOfficial(resourcesDir, { closedProcesses });
 }
 
-async function installDirectDiscordMode(resourcesDir, { closedProcesses, state }) {
-  if (state.state === "vencord-only") {
-    return installDirectDiscord(resourcesDir, { closedProcesses });
+export async function uninstallSelfFromResources(
+  resourcesDir,
+  { forceClose = false, skipProcessCheck = false } = {}
+) {
+  const closedProcesses = await prepareForAsarChanges(resourcesDir, { forceClose, skipProcessCheck });
+  const state = await evaluateInstallState(resourcesDir);
+  const appAsar = getAppAsarPath(resourcesDir);
+  const backupAsar = getBackupAsarPath(resourcesDir);
+  const markerJson = getMarkerJsonPath(resourcesDir);
+
+  if (state.state === "vencord-over-dmi") {
+    throw new Error("DMI appears to be installed under Vencord. Uninstall Vencord first, then run DMI uninstall.");
   }
 
-  if (state.state === "mobile-then-vencord") {
-    return uninstallVencordLayerFromResources(resourcesDir, {
-      skipProcessCheck: true
-    });
+  if (state.state !== "dmi-only") {
+    throw new Error(state.reason ?? `DMI uninstall is not supported for state: ${state.state}`);
   }
 
-  if (state.state === "vencord-then-mobile") {
-    await removeWithBusyRetry(getVencordLoaderAsarPath(resourcesDir));
-    const result = await repairActiveLoader(resourcesDir, { closedProcesses, state });
-    return { ...result, removedVencordLayer: true };
+  const marker = JSON.parse(await fs.readFile(markerJson, "utf8"));
+  const currentHash = await sha256File(appAsar);
+  if (marker.patchedSha256 && marker.patchedSha256 !== currentHash) {
+    throw new Error("current app.asar hash does not match the DMI marker; refusing to overwrite a modified app.asar");
   }
 
-  if (state.alreadyInstalled) {
-    return repairActiveLoader(resourcesDir, { closedProcesses, state });
+  const backupHash = await sha256File(backupAsar);
+  if (marker.originalSha256 && marker.originalSha256 !== backupHash) {
+    throw new Error("backup app.asar hash does not match the DMI marker; refusing to restore an unexpected backup");
   }
 
-  if (await exists(getDiscordBodyAsarPath(resourcesDir))) {
-    return installDirectDiscord(resourcesDir, { closedProcesses });
-  }
+  const restoreTemp = path.join(resourcesDir, `.app.asar.dmi-restore-${process.pid}-${Date.now()}.tmp`);
 
-  if (state.action !== "install") {
-    throw new Error(state.reason ?? "install guard failed");
-  }
+  try {
+    await fs.copyFile(backupAsar, restoreTemp);
+    await removeWithBusyRetry(appAsar);
+    await renameWithBusyRetry(restoreTemp, appAsar);
+    await removeWithBusyRetry(backupAsar);
+    await removeWithBusyRetry(markerJson);
 
-  return installFreshOfficial(resourcesDir, { closedProcesses });
+    return {
+      uninstalled: true,
+      command: "uninstall",
+      state: state.state,
+      appAsar,
+      closedProcesses
+    };
+  } catch (error) {
+    await fs.rm(restoreTemp, { force: true });
+    throw error;
+  }
+}
+
+export async function uninstallVencordLayerFromResources() {
+  throw new Error("DMI no longer manages Vencord layers. Uninstall Vencord with Vencord first.");
 }
 
 async function installFreshOfficial(resourcesDir, { closedProcesses }) {
   const appAsar = getAppAsarPath(resourcesDir);
-  const backupAsar = getDiscordBodyAsarPath(resourcesDir);
+  const backupAsar = getBackupAsarPath(resourcesDir);
+  const markerJson = getMarkerJsonPath(resourcesDir);
+  const patchedTemp = path.join(resourcesDir, `.app.asar.dmi-new-${process.pid}-${Date.now()}.tmp`);
   const originalHash = await sha256File(appAsar);
-  const tempLoaderAsar = path.join(
-    resourcesDir,
-    `.app.asar.mobile-identify-loader-${process.pid}-${Date.now()}.tmp`
-  );
-
-  await buildLoaderAsar(tempLoaderAsar);
-  if (!(await isOurLoader(tempLoaderAsar))) {
-    throw new Error(`built loader marker verification failed: ${tempLoaderAsar}`);
-  }
 
   let renamedOriginal = false;
   try {
     await renameWithBusyRetry(appAsar, backupAsar);
     renamedOriginal = true;
-    await copyFallbackBackupIfMissing(backupAsar, getBackupAsarPath(resourcesDir));
-    await renameWithBusyRetry(tempLoaderAsar, appAsar);
 
-    if (!(await isOurLoader(appAsar))) {
-      throw new Error(
-        "installed app.asar marker verification failed; close Discord completely and retry because another process may have replaced app.asar"
-      );
-    }
+    await buildPatchedDiscordAsar(backupAsar, patchedTemp);
+    const patchedHash = await sha256File(patchedTemp);
+    await renameWithBusyRetry(patchedTemp, appAsar);
+
+    const marker = {
+      tool: PATCHER_NAME,
+      name: DISPLAY_NAME,
+      version: VERSION,
+      mode: DIRECT_PATCH_MODE,
+      backup: BACKUP_ASAR_NAME,
+      marker: MARKER_JSON_NAME,
+      installedAt: new Date().toISOString(),
+      originalSha256: originalHash,
+      patchedSha256: patchedHash
+    };
+    await fs.writeFile(markerJson, `${JSON.stringify(marker, null, 2)}\n`, "utf8");
 
     return {
       installed: true,
       alreadyInstalled: false,
+      installMode: DIRECT_PATCH_MODE,
       appAsar,
       backupAsar,
+      markerJson,
       closedProcesses,
-      originalHash
+      originalHash,
+      patchedHash
     };
   } catch (error) {
-    await fs.rm(tempLoaderAsar, { force: true });
+    await fs.rm(patchedTemp, { force: true });
 
-    if (renamedOriginal) {
+    if (renamedOriginal && !(await exists(appAsar))) {
       try {
         await fs.rename(backupAsar, appAsar);
       } catch {
@@ -140,87 +152,6 @@ async function installFreshOfficial(resourcesDir, { closedProcesses }) {
   }
 }
 
-export async function uninstallSelfFromResources(
-  resourcesDir,
-  { forceClose = false, skipProcessCheck = false } = {}
-) {
-  const closedProcesses = await prepareForAsarChanges(resourcesDir, { forceClose, skipProcessCheck });
-  const state = await evaluateInstallState(resourcesDir);
-  const appAsar = getAppAsarPath(resourcesDir);
-  const discordBodyAsar = getDiscordBodyAsarPath(resourcesDir);
-  const backupAsar = getBackupAsarPath(resourcesDir);
-  const vencordLoaderAsar = getVencordLoaderAsarPath(resourcesDir);
-
-  if (!state.canUninstallSelf) {
-    throw new Error(`self layer is not installed in current state: ${state.state}`);
-  }
-
-  if (state.state === "mobile-only") {
-    const officialSource = await exists(discordBodyAsar) ? discordBodyAsar : backupAsar;
-    if (!(await exists(officialSource))) {
-      throw new Error("official Discord body was not found for uninstall-self");
-    }
-
-    await removeWithBusyRetry(appAsar);
-    await renameWithBusyRetry(officialSource, appAsar);
-    await removeWithBusyRetry(backupAsar);
-    return { uninstalled: true, command: "uninstall-self", state: state.state, closedProcesses };
-  }
-
-  if (state.state === "vencord-then-mobile") {
-    await removeWithBusyRetry(appAsar);
-    await renameWithBusyRetry(vencordLoaderAsar, appAsar);
-    await removeWithBusyRetry(backupAsar);
-    return { uninstalled: true, command: "uninstall-self", state: state.state, closedProcesses };
-  }
-
-  if (state.state === "mobile-then-vencord") {
-    await removeWithBusyRetry(discordBodyAsar);
-    await renameWithBusyRetry(backupAsar, discordBodyAsar);
-    return { uninstalled: true, command: "uninstall-self", state: state.state, closedProcesses };
-  }
-
-  throw new Error(`unsupported uninstall-self state: ${state.state}`);
-}
-
-export async function uninstallVencordLayerFromResources(
-  resourcesDir,
-  { forceClose = false, skipProcessCheck = false } = {}
-) {
-  const closedProcesses = await prepareForAsarChanges(resourcesDir, { forceClose, skipProcessCheck });
-  const state = await evaluateInstallState(resourcesDir);
-  const appAsar = getAppAsarPath(resourcesDir);
-  const discordBodyAsar = getDiscordBodyAsarPath(resourcesDir);
-  const backupAsar = getBackupAsarPath(resourcesDir);
-  const vencordLoaderAsar = getVencordLoaderAsarPath(resourcesDir);
-
-  if (!state.canUninstallVencordLayer) {
-    throw new Error(`Vencord layer is not installed in current state: ${state.state}`);
-  }
-
-  if (state.state === "vencord-only") {
-    await removeWithBusyRetry(appAsar);
-    await renameWithBusyRetry(discordBodyAsar, appAsar);
-    return { uninstalled: true, command: "uninstall-vencord-layer", state: state.state, closedProcesses };
-  }
-
-  if (state.state === "vencord-then-mobile") {
-    await removeWithBusyRetry(vencordLoaderAsar);
-    return { uninstalled: true, command: "uninstall-vencord-layer", state: state.state, closedProcesses };
-  }
-
-  if (state.state === "mobile-then-vencord") {
-    await removeWithBusyRetry(appAsar);
-    await renameWithBusyRetry(discordBodyAsar, appAsar);
-    if (!(await exists(discordBodyAsar))) {
-      await fs.copyFile(backupAsar, discordBodyAsar);
-    }
-    return { uninstalled: true, command: "uninstall-vencord-layer", state: state.state, closedProcesses };
-  }
-
-  throw new Error(`unsupported uninstall-vencord-layer state: ${state.state}`);
-}
-
 async function prepareForAsarChanges(resourcesDir, { forceClose, skipProcessCheck }) {
   if (forceClose) {
     const closeResult = await closeDiscordForInstall(resourcesDir);
@@ -232,212 +163,6 @@ async function prepareForAsarChanges(resourcesDir, { forceClose, skipProcessChec
   }
 
   return [];
-}
-
-async function installDirectDiscord(resourcesDir, { closedProcesses }) {
-  const appAsar = getAppAsarPath(resourcesDir);
-  const backupAsar = getBackupAsarPath(resourcesDir);
-  const legacyVencordBodyAsar = getDiscordBodyAsarPath(resourcesDir);
-  const originalHash = await sha256File(legacyVencordBodyAsar);
-  const tempLoaderAsar = path.join(
-    resourcesDir,
-    `.app.asar.mobile-identify-loader-${process.pid}-${Date.now()}.tmp`
-  );
-
-  await buildLoaderAsar(tempLoaderAsar);
-  if (!(await isOurLoader(tempLoaderAsar))) {
-    throw new Error(`built loader marker verification failed: ${tempLoaderAsar}`);
-  }
-
-  let movedDiscordBody = false;
-  try {
-    await removeWithBusyRetry(backupAsar);
-    await renameWithBusyRetry(legacyVencordBodyAsar, backupAsar);
-    movedDiscordBody = true;
-    await removeWithBusyRetry(appAsar);
-    await renameWithBusyRetry(tempLoaderAsar, appAsar);
-
-    if (!(await isOurLoader(appAsar))) {
-      throw new Error("direct Discord app.asar marker verification failed");
-    }
-
-    return {
-      installed: true,
-      alreadyInstalled: false,
-      installMode: "direct-discord",
-      appAsar,
-      backupAsar,
-      disabledExistingLayer: true,
-      closedProcesses,
-      originalHash
-    };
-  } catch (error) {
-    await fs.rm(tempLoaderAsar, { force: true });
-
-    if (movedDiscordBody && !(await exists(appAsar))) {
-      try {
-        await fs.rename(backupAsar, appAsar);
-      } catch {
-        error.message = `${error.message}; rollback failed, Discord body remains at ${backupAsar}`;
-      }
-    } else if (movedDiscordBody && !(await exists(legacyVencordBodyAsar))) {
-      try {
-        await fs.rename(backupAsar, legacyVencordBodyAsar);
-      } catch {
-        error.message = `${error.message}; rollback failed, Discord body remains at ${backupAsar}`;
-      }
-    }
-
-    throw error;
-  }
-}
-
-async function installVencordChain(resourcesDir, { closedProcesses, installMode }) {
-  const appAsar = getAppAsarPath(resourcesDir);
-  const discordBodyAsar = getDiscordBodyAsarPath(resourcesDir);
-  const backupAsar = getBackupAsarPath(resourcesDir);
-  const vencordLoaderAsar = getVencordLoaderAsarPath(resourcesDir);
-  const originalHash = await sha256File(appAsar);
-  const tempLoaderAsar = path.join(
-    resourcesDir,
-    `.app.asar.mobile-identify-loader-${process.pid}-${Date.now()}.tmp`
-  );
-
-  if (await isOurLoader(appAsar)) {
-    return repairActiveLoader(resourcesDir, {
-      closedProcesses,
-      state: await evaluateInstallState(resourcesDir)
-    });
-  }
-
-  const normalizedExistingMobileLoader = await isOurLoader(discordBodyAsar);
-  if (normalizedExistingMobileLoader) {
-    if (!(await exists(backupAsar))) {
-      throw new Error(
-        "_app.asar is already this loader, but app.dmi.asar was not found; cannot recover Discord body"
-      );
-    }
-    await removeWithBusyRetry(discordBodyAsar);
-    await renameWithBusyRetry(backupAsar, discordBodyAsar);
-  }
-
-  await buildLoaderAsar(tempLoaderAsar);
-  if (!(await isOurLoader(tempLoaderAsar))) {
-    throw new Error(`built loader marker verification failed: ${tempLoaderAsar}`);
-  }
-
-  let movedVencordLoader = false;
-  try {
-    await removeWithBusyRetry(vencordLoaderAsar);
-    await renameWithBusyRetry(appAsar, vencordLoaderAsar);
-    movedVencordLoader = true;
-    await renameWithBusyRetry(tempLoaderAsar, appAsar);
-
-    if (!(await isOurLoader(appAsar))) {
-      throw new Error("Vencord chain app.asar marker verification failed");
-    }
-
-    return {
-      installed: true,
-      alreadyInstalled: false,
-      installMode,
-      appAsar,
-      discordBodyAsar,
-      vencordLoaderAsar,
-      normalizedExistingMobileLoader,
-      closedProcesses,
-      originalHash
-    };
-  } catch (error) {
-    await fs.rm(tempLoaderAsar, { force: true });
-
-    if (movedVencordLoader && !(await exists(appAsar))) {
-      try {
-        await fs.rename(vencordLoaderAsar, appAsar);
-      } catch {
-        error.message = `${error.message}; rollback failed, Vencord loader remains at ${vencordLoaderAsar}`;
-      }
-    }
-
-    throw error;
-  }
-}
-
-async function repairExistingInstall(resourcesDir, { closedProcesses, state }) {
-  const appAsar = getAppAsarPath(resourcesDir);
-  const backupAsar = getBackupAsarPath(resourcesDir);
-  const tempLoaderAsar = path.join(
-    resourcesDir,
-    `.app.asar.mobile-identify-loader-${process.pid}-${Date.now()}.tmp`
-  );
-
-  const backupExists = await exists(backupAsar);
-
-  if (!(await exists(backupAsar))) {
-    return { installed: false, alreadyInstalled: true, repaired: false, closedProcesses, state };
-  }
-
-  await buildLoaderAsar(tempLoaderAsar);
-  if (!(await isOurLoader(tempLoaderAsar))) {
-    throw new Error(`built loader marker verification failed: ${tempLoaderAsar}`);
-  }
-
-  try {
-    await removeWithBusyRetry(appAsar);
-    await renameWithBusyRetry(tempLoaderAsar, appAsar);
-
-    if (!(await isOurLoader(appAsar))) {
-      throw new Error("repaired app.asar marker verification failed");
-    }
-
-    return {
-      installed: false,
-      alreadyInstalled: true,
-      repaired: true,
-      appAsar,
-      backupAsar,
-      migratedLegacyBackup: false,
-      closedProcesses,
-      state
-    };
-  } catch (error) {
-    await fs.rm(tempLoaderAsar, { force: true });
-    throw error;
-  }
-}
-
-async function repairActiveLoader(resourcesDir, { closedProcesses, state }) {
-  const appAsar = getAppAsarPath(resourcesDir);
-  const tempLoaderAsar = path.join(
-    resourcesDir,
-    `.app.asar.mobile-identify-loader-${process.pid}-${Date.now()}.tmp`
-  );
-
-  await buildLoaderAsar(tempLoaderAsar);
-  if (!(await isOurLoader(tempLoaderAsar))) {
-    throw new Error(`built loader marker verification failed: ${tempLoaderAsar}`);
-  }
-
-  try {
-    await removeWithBusyRetry(appAsar);
-    await renameWithBusyRetry(tempLoaderAsar, appAsar);
-
-    if (!(await isOurLoader(appAsar))) {
-      throw new Error("repaired app.asar marker verification failed");
-    }
-
-    return {
-      installed: false,
-      alreadyInstalled: true,
-      repaired: true,
-      appAsar,
-      closedProcesses,
-      state
-    };
-  } catch (error) {
-    await fs.rm(tempLoaderAsar, { force: true });
-    throw error;
-  }
 }
 
 async function renameWithBusyRetry(from, to, { attempts = 12, delayMs = 500 } = {}) {
@@ -484,11 +209,6 @@ async function removeWithBusyRetry(filePath, { attempts = 12, delayMs = 500 } = 
   }
 
   throw lastError;
-}
-
-async function copyFallbackBackupIfMissing(from, to) {
-  if (await exists(to)) return;
-  await fs.copyFile(from, to);
 }
 
 function sleep(ms) {

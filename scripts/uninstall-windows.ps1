@@ -1,21 +1,9 @@
 param(
   [ValidateSet("stable", "canary", "ptb")]
-  [string]$Branch = "stable",
-
-  [ValidateSet("self", "vencord-layer")]
-  [string]$Target = $env:DMI_UNINSTALL_TARGET
+  [string]$Branch = "stable"
 )
 
 $ErrorActionPreference = "Stop"
-
-if ([string]::IsNullOrWhiteSpace($Target)) {
-  $Target = "self"
-}
-
-$command = switch ($Target) {
-  "self" { "uninstall-self" }
-  "vencord-layer" { "uninstall-vencord-layer" }
-}
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
@@ -36,7 +24,7 @@ try {
     npm install
   }
 
-  node src/cli.mjs $command --branch $Branch --force-close
+  node src/cli.mjs uninstall --branch $Branch --force-close
 } finally {
   Set-Location $previousLocation
 }

@@ -67,27 +67,8 @@ function loadNextApp(nextAsarPath) {
   return require(path.join(nextAsarPath, mainFile));
 }
 
-function getNextAppPlan(resourcesPath, loaderDir = __dirname, fsModule = fs) {
-  const vencordLoaderAsar = path.join(resourcesPath, "app.vc.asar");
-  if (fsModule.existsSync(vencordLoaderAsar)) {
-    return { nextAsar: vencordLoaderAsar, shouldPatch: true };
-  }
-
-  const fallbackDiscordAsar = path.join(resourcesPath, "app.dmi.asar");
-  const discordBodyAsar = path.join(resourcesPath, "_app.asar");
-  if (
-    fsModule.existsSync(fallbackDiscordAsar)
-    && (loaderDir.endsWith("_app.asar") || !fsModule.existsSync(discordBodyAsar))
-  ) {
-    return { nextAsar: fallbackDiscordAsar, shouldPatch: true };
-  }
-
-  return { nextAsar: discordBodyAsar, shouldPatch: true };
-}
-
 module.exports = {
   createCombinedPreload,
-  getNextAppPlan,
   loadNextApp,
   patchBrowserWindowPreload,
   withChainedPreload

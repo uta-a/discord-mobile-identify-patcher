@@ -1,7 +1,6 @@
 param(
   [string]$Branch = $env:DMI_BRANCH,
-  [string]$Ref = $env:DMI_REF,
-  [string]$Target = $env:DMI_UNINSTALL_TARGET
+  [string]$Ref = $env:DMI_REF
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,14 +15,6 @@ if (@("stable", "canary", "ptb") -notcontains $Branch) {
 
 if ([string]::IsNullOrWhiteSpace($Ref)) {
   $Ref = "main"
-}
-
-if ([string]::IsNullOrWhiteSpace($Target)) {
-  $Target = "self"
-}
-
-if (@("self", "vencord-layer") -notcontains $Target) {
-  throw "Invalid uninstall target '$Target'. Use self or vencord-layer."
 }
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -68,7 +59,7 @@ try {
     throw "Downloaded archive did not contain a project directory."
   }
 
-  & (Join-Path $repoRoot.FullName "scripts\uninstall-windows.ps1") -Branch $Branch -Target $Target
+  & (Join-Path $repoRoot.FullName "scripts\uninstall-windows.ps1") -Branch $Branch
 } finally {
   Set-Location $previousLocation
 
