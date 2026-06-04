@@ -3,7 +3,7 @@ set -euo pipefail
 
 branch="${1:-${DMI_BRANCH:-stable}}"
 ref="${DMI_REF:-main}"
-install_mode="${DMI_INSTALL_MODE:-auto}"
+target="${DMI_UNINSTALL_TARGET:-self}"
 
 case "$branch" in
   stable|canary|ptb) ;;
@@ -13,10 +13,10 @@ case "$branch" in
     ;;
 esac
 
-case "$install_mode" in
-  auto|preserve-existing|direct-discord) ;;
+case "$target" in
+  self|vencord-layer) ;;
   *)
-    echo "DMI_INSTALL_MODE must be auto, preserve-existing, or direct-discord" >&2
+    echo "DMI_UNINSTALL_TARGET must be self or vencord-layer" >&2
     exit 2
     ;;
 esac
@@ -51,4 +51,4 @@ if [ -z "$repo_root" ]; then
   exit 1
 fi
 
-DMI_INSTALL_MODE="$install_mode" bash "$repo_root/scripts/install-macos.sh" "$branch"
+DMI_UNINSTALL_TARGET="$target" bash "$repo_root/scripts/uninstall-macos.sh" "$branch"

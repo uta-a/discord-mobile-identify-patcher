@@ -13,6 +13,11 @@ import {
 import { pathExists } from "./utils/fileOps.mjs";
 
 async function main(argv) {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    printUsage();
+    return;
+  }
+
   const { command, options } = parseArgs(argv);
 
   if (!["check", "install", "uninstall-self", "uninstall-vencord-layer"].includes(command)) {

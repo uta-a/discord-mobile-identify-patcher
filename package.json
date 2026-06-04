@@ -9,7 +9,9 @@
     "test": "node --test",
     "check": "npm test",
     "install:win": "powershell -ExecutionPolicy Bypass -File scripts/install-windows.ps1",
-    "install:mac": "bash scripts/install-macos.sh"
+    "install:mac": "bash scripts/install-macos.sh",
+    "uninstall:win": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows.ps1",
+    "uninstall:mac": "bash scripts/uninstall-macos.sh"
   },
   "dependencies": {
     "@electron/asar": "^3.4.1"
