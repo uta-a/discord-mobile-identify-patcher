@@ -3,9 +3,10 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-const root = new URL("../", import.meta.url);
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);
 
 test("distribution scripts include install and uninstall entrypoints for Windows and macOS", async () => {
@@ -21,13 +22,13 @@ test("distribution scripts include install and uninstall entrypoints for Windows
   ];
 
   for (const script of scripts) {
-    const stat = await fs.stat(path.join(root.pathname, script));
+    const stat = await fs.stat(path.join(root, script));
     assert.equal(stat.isFile(), true, `${script} should exist`);
   }
 });
 
 test("package scripts expose local install and uninstall commands", async () => {
-  const packageJson = JSON.parse(await fs.readFile(path.join(root.pathname, "package.json"), "utf8"));
+  const packageJson = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
 
   assert.equal(packageJson.scripts["install:win"], "powershell -ExecutionPolicy Bypass -File scripts/install-windows.ps1");
   assert.equal(packageJson.scripts["install:mac"], "bash scripts/install-macos.sh");
@@ -36,7 +37,7 @@ test("package scripts expose local install and uninstall commands", async () => 
 });
 
 test("README documents one-step install and uninstall commands", async () => {
-  const readme = await fs.readFile(path.join(root.pathname, "README.md"), "utf8");
+  const readme = await fs.readFile(path.join(root, "README.md"), "utf8");
 
   assert.match(readme, /bootstrap-windows\.ps1/);
   assert.match(readme, /bootstrap-macos\.sh/);
@@ -48,7 +49,7 @@ test("README documents one-step install and uninstall commands", async () => {
 
 test("CLI help exits successfully", async () => {
   const { stdout } = await execFileAsync(process.execPath, ["src/cli.mjs", "--help"], {
-    cwd: root.pathname
+    cwd: root
   });
 
   assert.match(stdout, /node src\/cli\.mjs install/);

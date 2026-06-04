@@ -38,7 +38,7 @@ async function main(argv) {
 
   if (command === "check") {
     const state = await evaluateInstallState(resourcesDir);
-    console.log(JSON.stringify({ resourcesDir, ...state }, null, 2));
+    console.log(JSON.stringify({ branch: options.branch, version: getInstallVersion(resourcesDir), resourcesDir, ...state }, null, 2));
     process.exitCode = state.action === "abort" ? 1 : 0;
     return;
   }
@@ -48,7 +48,7 @@ async function main(argv) {
       forceClose: options.forceClose,
       installMode: options.installMode
     });
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(withInstallMetadata(result, resourcesDir, options.branch), null, 2));
     return;
   }
 
@@ -56,7 +56,7 @@ async function main(argv) {
     const result = await uninstallSelfFromResources(resourcesDir, {
       forceClose: options.forceClose
     });
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(withInstallMetadata(result, resourcesDir, options.branch), null, 2));
     return;
   }
 
@@ -64,7 +64,7 @@ async function main(argv) {
     const result = await uninstallVencordLayerFromResources(resourcesDir, {
       forceClose: options.forceClose
     });
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(withInstallMetadata(result, resourcesDir, options.branch), null, 2));
   }
 }
 
@@ -90,6 +90,7 @@ async function runInteractiveInstall(options) {
 
     terminal.output.write("\nInstall summary:\n");
     terminal.output.write(`  Branch: ${installTarget.branch}\n`);
+    terminal.output.write(`  Version: ${installTarget.version}\n`);
     terminal.output.write(`  Resources: ${installTarget.resourcesDir}\n`);
     terminal.output.write(`  Mode: ${installMode}\n`);
     terminal.output.write(`  Force close: ${forceClose ? "yes" : "no"}\n\n`);
@@ -104,7 +105,7 @@ async function runInteractiveInstall(options) {
       forceClose,
       installMode
     });
-    terminal.output.write(`${JSON.stringify(result, null, 2)}\n`);
+    terminal.output.write(`${JSON.stringify(withInstallMetadata(result, installTarget.resourcesDir, installTarget.branch), null, 2)}\n`);
   } finally {
     rl.close();
     terminal.close?.();
@@ -114,7 +115,12 @@ async function runInteractiveInstall(options) {
 async function promptInstallTarget(rl, output, options) {
   if (options.discordPath) {
     const branch = options.branchProvided ? options.branch : "custom";
-    return { branch, resourcesDir: options.discordPath, state: await describeResources(options.discordPath) };
+    return {
+      branch,
+      version: getInstallVersion(options.discordPath),
+      resourcesDir: options.discordPath,
+      state: await describeResources(options.discordPath)
+    };
   }
 
   const candidates = await detectInstallCandidates(options.branchProvided ? [options.branch] : ["stable", "canary", "ptb"]);
@@ -122,12 +128,17 @@ async function promptInstallTarget(rl, output, options) {
   if (candidates.length === 0) {
     output.write("No Discord installs were detected automatically.\n");
     const resourcesDir = await promptRequired(rl, "Enter Discord resources path");
-    return { branch: "custom", resourcesDir, state: await describeResources(resourcesDir) };
+    return {
+      branch: "custom",
+      version: getInstallVersion(resourcesDir),
+      resourcesDir,
+      state: await describeResources(resourcesDir)
+    };
   }
 
   output.write("Detected Discord installs:\n");
   candidates.forEach((candidate, index) => {
-    output.write(`  ${index + 1}. ${candidate.branch} - ${candidate.resourcesDir}\n`);
+    output.write(`  ${index + 1}. ${candidate.branch} ${candidate.version} - ${candidate.resourcesDir}\n`);
     output.write(`     ${formatStateSummary(candidate.state)}\n`);
   });
 
@@ -143,6 +154,7 @@ async function detectInstallCandidates(branches) {
       if (!(await pathExists(path.join(resourcesDir, "app.asar")))) continue;
       candidates.push({
         branch,
+        version: getInstallVersion(resourcesDir),
         resourcesDir,
         state: await describeResources(resourcesDir)
       });
@@ -150,6 +162,20 @@ async function detectInstallCandidates(branches) {
   }
 
   return candidates;
+}
+
+function getInstallVersion(resourcesDir) {
+  const appDir = path.basename(path.dirname(resourcesDir));
+  return appDir.startsWith("app-") ? appDir.slice("app-".length) : appDir;
+}
+
+function withInstallMetadata(result, resourcesDir, branch) {
+  return {
+    branch,
+    version: getInstallVersion(resourcesDir),
+    resourcesDir,
+    ...result
+  };
 }
 
 async function describeResources(resourcesDir) {
