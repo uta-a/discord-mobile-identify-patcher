@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import * as readline from "node:readline";
+import * as tty from "node:tty";
 import { createInterface } from "node:readline/promises";
 import { stdin as processStdin, stdout as processStdout } from "node:process";
 import path from "node:path";
@@ -328,20 +329,16 @@ function openTerminal() {
   }
 
   try {
-    const input = fs.createReadStream(null, {
-      fd: fs.openSync("/dev/tty", "r"),
-      autoClose: true
-    });
-    const output = fs.createWriteStream(null, {
-      fd: fs.openSync("/dev/tty", "w"),
-      autoClose: true
-    });
+    const inputFd = fs.openSync("/dev/tty", "r");
+    const outputFd = fs.openSync("/dev/tty", "w");
+    const input = new tty.ReadStream(inputFd);
+    const output = new tty.WriteStream(outputFd);
     return {
       input,
       output,
       close() {
-        input.close();
-        output.close();
+        input.destroy();
+        output.destroy();
       }
     };
   } catch {
