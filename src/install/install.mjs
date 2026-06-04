@@ -2,15 +2,21 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { buildLoaderAsar } from "./buildLoaderAsar.mjs";
 import { evaluateInstallState, isOurLoader } from "./guard.mjs";
-import { getAppAsarPath, getBackupAsarPath, getLegacyBackupAsarPath } from "../utils/asarPaths.mjs";
+import {
+  getAppAsarPath,
+  getBackupAsarPath,
+  getDiscordBodyAsarPath,
+  getLegacyBackupAsarPath,
+  getVencordLoaderAsarPath
+} from "../utils/asarPaths.mjs";
 import { sha256File } from "../utils/hash.mjs";
 import { assertDiscordNotRunning, closeDiscordForInstall } from "./processGuard.mjs";
 
-const INSTALL_MODES = new Set(["preserve-existing", "direct-discord"]);
+const INSTALL_MODES = new Set(["auto", "preserve-existing", "direct-discord"]);
 
 export async function installToResources(
   resourcesDir,
-  { forceClose = false, skipProcessCheck = false, installMode = "direct-discord" } = {}
+  { forceClose = false, skipProcessCheck = false, installMode = "auto" } = {}
 ) {
   if (!INSTALL_MODES.has(installMode)) {
     throw new Error(`Unsupported install mode: ${installMode}`);
@@ -25,8 +31,13 @@ export async function installToResources(
     await assertDiscordNotRunning(resourcesDir);
   }
 
-  if (installMode === "direct-discord" && (await exists(getLegacyVencordBodyPath(resourcesDir)))) {
+  if (installMode === "direct-discord" && (await exists(getDiscordBodyAsarPath(resourcesDir)))) {
     return installDirectDiscord(resourcesDir, { closedProcesses });
+  }
+
+  if ((installMode === "auto" || installMode === "preserve-existing")
+    && (await exists(getDiscordBodyAsarPath(resourcesDir)))) {
+    return installVencordChain(resourcesDir, { closedProcesses, installMode: "vencord-chain" });
   }
 
   const state = await evaluateInstallState(resourcesDir);
@@ -40,7 +51,7 @@ export async function installToResources(
   }
 
   const appAsar = getAppAsarPath(resourcesDir);
-  const backupAsar = getBackupAsarPath(resourcesDir);
+  const backupAsar = getDiscordBodyAsarPath(resourcesDir);
   const originalHash = await sha256File(appAsar);
   const tempLoaderAsar = path.join(
     resourcesDir,
@@ -56,6 +67,7 @@ export async function installToResources(
   try {
     await renameWithBusyRetry(appAsar, backupAsar);
     renamedOriginal = true;
+    await copyFallbackBackupIfMissing(backupAsar, getBackupAsarPath(resourcesDir));
     await renameWithBusyRetry(tempLoaderAsar, appAsar);
 
     if (!(await isOurLoader(appAsar))) {
@@ -96,7 +108,7 @@ export async function installToResources(
 async function installDirectDiscord(resourcesDir, { closedProcesses }) {
   const appAsar = getAppAsarPath(resourcesDir);
   const backupAsar = getBackupAsarPath(resourcesDir);
-  const legacyVencordBodyAsar = getLegacyVencordBodyPath(resourcesDir);
+  const legacyVencordBodyAsar = getDiscordBodyAsarPath(resourcesDir);
   const originalHash = await sha256File(legacyVencordBodyAsar);
   const tempLoaderAsar = path.join(
     resourcesDir,
@@ -144,6 +156,74 @@ async function installDirectDiscord(resourcesDir, { closedProcesses }) {
         await fs.rename(backupAsar, legacyVencordBodyAsar);
       } catch {
         error.message = `${error.message}; rollback failed, Discord body remains at ${backupAsar}`;
+      }
+    }
+
+    throw error;
+  }
+}
+
+async function installVencordChain(resourcesDir, { closedProcesses, installMode }) {
+  const appAsar = getAppAsarPath(resourcesDir);
+  const discordBodyAsar = getDiscordBodyAsarPath(resourcesDir);
+  const legacyBackupAsar = getBackupAsarPath(resourcesDir);
+  const vencordLoaderAsar = getVencordLoaderAsarPath(resourcesDir);
+  const originalHash = await sha256File(appAsar);
+  const tempLoaderAsar = path.join(
+    resourcesDir,
+    `.app.asar.mobile-identify-loader-${process.pid}-${Date.now()}.tmp`
+  );
+
+  if (await isOurLoader(appAsar)) {
+    return { installed: false, alreadyInstalled: true, repaired: false, closedProcesses };
+  }
+
+  const normalizedExistingMobileLoader = await isOurLoader(discordBodyAsar);
+  if (normalizedExistingMobileLoader) {
+    if (!(await exists(legacyBackupAsar))) {
+      throw new Error(
+        "_app.asar is already this loader, but app.mobile-status-backup.asar was not found; cannot recover Discord body"
+      );
+    }
+    await removeWithBusyRetry(discordBodyAsar);
+    await renameWithBusyRetry(legacyBackupAsar, discordBodyAsar);
+  }
+
+  await buildLoaderAsar(tempLoaderAsar);
+  if (!(await isOurLoader(tempLoaderAsar))) {
+    throw new Error(`built loader marker verification failed: ${tempLoaderAsar}`);
+  }
+
+  let movedVencordLoader = false;
+  try {
+    await removeWithBusyRetry(vencordLoaderAsar);
+    await renameWithBusyRetry(appAsar, vencordLoaderAsar);
+    movedVencordLoader = true;
+    await renameWithBusyRetry(tempLoaderAsar, appAsar);
+
+    if (!(await isOurLoader(appAsar))) {
+      throw new Error("Vencord chain app.asar marker verification failed");
+    }
+
+    return {
+      installed: true,
+      alreadyInstalled: false,
+      installMode,
+      appAsar,
+      discordBodyAsar,
+      vencordLoaderAsar,
+      normalizedExistingMobileLoader,
+      closedProcesses,
+      originalHash
+    };
+  } catch (error) {
+    await fs.rm(tempLoaderAsar, { force: true });
+
+    if (movedVencordLoader && !(await exists(appAsar))) {
+      try {
+        await fs.rename(vencordLoaderAsar, appAsar);
+      } catch {
+        error.message = `${error.message}; rollback failed, Vencord loader remains at ${vencordLoaderAsar}`;
       }
     }
 
@@ -246,14 +326,15 @@ async function removeWithBusyRetry(filePath, { attempts = 12, delayMs = 500 } = 
   throw lastError;
 }
 
+async function copyFallbackBackupIfMissing(from, to) {
+  if (await exists(to)) return;
+  await fs.copyFile(from, to);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-function getLegacyVencordBodyPath(resourcesDir) {
-  return path.join(resourcesDir, "_app.asar");
 }
 
 async function exists(filePath) {

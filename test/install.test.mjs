@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import asar from "@electron/asar";
-import { BACKUP_ASAR_NAME, LEGACY_BACKUP_ASAR_NAME } from "../src/config.mjs";
+import {
+  BACKUP_ASAR_NAME,
+  DISCORD_BODY_ASAR_NAME,
+  LEGACY_BACKUP_ASAR_NAME,
+  VENCORD_LOADER_ASAR_NAME
+} from "../src/config.mjs";
 import { buildLoaderAsar } from "../src/install/buildLoaderAsar.mjs";
 import { installToResources } from "../src/install/install.mjs";
 import { evaluateInstallState, isOurLoader } from "../src/install/guard.mjs";
@@ -17,19 +22,23 @@ test("install renames current app.asar to backup and places loader", async () =>
 
     assert.equal(result.installed, true);
     assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, DISCORD_BODY_ASAR_NAME), "utf8"), "official");
     assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "official");
   });
 });
 
-test("install does not touch _app.asar in Vencord-like resources", async () => {
+test("install preserves Vencord chain by moving Vencord loader to app.vc.asar", async () => {
   await usingFixture(async (resourcesDir) => {
-    await fs.writeFile(path.join(resourcesDir, "app.asar"), "vencord loader");
+    await writeVencordLoader(path.join(resourcesDir, "app.asar"));
     await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
 
-    await installToResources(resourcesDir, { skipProcessCheck: true, installMode: "preserve-existing" });
+    const result = await installToResources(resourcesDir, { skipProcessCheck: true });
 
+    assert.equal(result.installMode, "vencord-chain");
+    assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
     assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
-    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "vencord loader");
+    assert.match(await readAsarText(path.join(resourcesDir, VENCORD_LOADER_ASAR_NAME), "index.js"), /Vencord/);
+    assert.equal(await pathExists(path.join(resourcesDir, BACKUP_ASAR_NAME)), false);
   });
 });
 
@@ -54,32 +63,31 @@ test("direct-discord mode removes Vencord-like active layer and backs up Discord
 
 test("default install mode backs up Discord body from Vencord-like _app.asar", async () => {
   await usingFixture(async (resourcesDir) => {
-    await fs.writeFile(path.join(resourcesDir, "app.asar"), "vencord loader");
+    await writeVencordLoader(path.join(resourcesDir, "app.asar"));
     await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
 
     await installToResources(resourcesDir, { skipProcessCheck: true });
 
     assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
-    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "official discord");
-    assert.equal(await pathExists(path.join(resourcesDir, "_app.asar")), false);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
+    assert.match(await readAsarText(path.join(resourcesDir, VENCORD_LOADER_ASAR_NAME), "index.js"), /Vencord/);
   });
 });
 
-test("direct-discord mode converts an existing preserve install without leaving Vencord layer active", async () => {
+test("install normalizes Vencord after existing mobile loader install", async () => {
   await usingFixture(async (resourcesDir) => {
-    await buildLoaderAsar(path.join(resourcesDir, "app.asar"));
-    await fs.writeFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "vencord loader");
-    await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
+    await writeVencordLoader(path.join(resourcesDir, "app.asar"));
+    await buildLoaderAsar(path.join(resourcesDir, "_app.asar"));
+    await fs.writeFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "official discord");
 
-    const result = await installToResources(resourcesDir, {
-      skipProcessCheck: true,
-      installMode: "direct-discord"
-    });
+    const result = await installToResources(resourcesDir, { skipProcessCheck: true });
 
     assert.equal(result.installed, true);
+    assert.equal(result.normalizedExistingMobileLoader, true);
     assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
-    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "official discord");
-    assert.equal(await pathExists(path.join(resourcesDir, "_app.asar")), false);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
+    assert.match(await readAsarText(path.join(resourcesDir, VENCORD_LOADER_ASAR_NAME), "index.js"), /Vencord/);
+    assert.equal(await pathExists(path.join(resourcesDir, BACKUP_ASAR_NAME)), false);
   });
 });
 
@@ -88,11 +96,11 @@ test("second install does not overwrite backup", async () => {
     await fs.writeFile(path.join(resourcesDir, "app.asar"), "official");
 
     await installToResources(resourcesDir, { skipProcessCheck: true });
-    const firstBackup = await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8");
+    const firstBackup = await fs.readFile(path.join(resourcesDir, DISCORD_BODY_ASAR_NAME), "utf8");
     const second = await installToResources(resourcesDir, { skipProcessCheck: true });
 
     assert.equal(second.alreadyInstalled, true);
-    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), firstBackup);
+    assert.equal(await fs.readFile(path.join(resourcesDir, DISCORD_BODY_ASAR_NAME), "utf8"), firstBackup);
   });
 });
 
@@ -145,6 +153,25 @@ async function usingFixture(callback) {
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+}
+
+async function writeVencordLoader(outputPath) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "vencord-loader-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "package.json"), JSON.stringify({ name: "discord", main: "index.js" }));
+    await fs.writeFile(
+      path.join(tempDir, "index.js"),
+      'require("/Users/example/Library/Application Support/Vencord/dist/patcher.js");\n'
+    );
+    await asar.createPackage(tempDir, outputPath);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function readAsarText(asarPath, fileName) {
+  asar.uncache(asarPath);
+  return asar.extractFile(asarPath, fileName).toString("utf8");
 }
 
 async function pathExists(filePath) {

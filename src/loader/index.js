@@ -4,13 +4,26 @@ const { createBrowserHookSource } = require("./mobileIdentifyHook.js");
 const { loadNextApp, patchBrowserWindowPreload } = require("./core.js");
 
 const resourcesDir = process.resourcesPath;
-const nextAsar = path.join(resourcesDir, "app.mobile-status-backup.asar");
+const nextAsar = selectNextAsar(resourcesDir);
 const ownPreload = path.join(__dirname, "preload.js");
 
 setupDiagnostics(electron);
 setupRendererInjection(electron, createBrowserHookSource());
 patchBrowserWindowPreload(electron, ownPreload);
 loadNextApp(nextAsar);
+
+function selectNextAsar(resourcesPath) {
+  const fs = require("fs");
+  const vencordLoaderAsar = path.join(resourcesPath, "app.vc.asar");
+  if (fs.existsSync(vencordLoaderAsar)) return vencordLoaderAsar;
+
+  const legacyBackupAsar = path.join(resourcesPath, "app.mobile-status-backup.asar");
+  if (__dirname.endsWith("_app.asar") && fs.existsSync(legacyBackupAsar)) {
+    return legacyBackupAsar;
+  }
+
+  return path.join(resourcesPath, "_app.asar");
+}
 
 function setupDiagnostics(electronModule) {
   try {

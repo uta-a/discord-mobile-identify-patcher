@@ -1,29 +1,24 @@
 # Discord Mobile IDENTIFY Patcher
 
-Independent Discord desktop patcher that inserts a small Electron loader before the existing `resources/app.asar` layer and rewrites Gateway `IDENTIFY` properties to Android-like values.
+Discord Desktop の Gateway `IDENTIFY` を Android 風の値に書き換えて、モバイル表示を狙う実験的なパッチャーです。
 
-This project is experimental. Modifying Discord's client files may violate Discord's terms or break after Discord updates. Use it at your own risk and keep Discord closed while installing.
+Discord のクライアントファイルを変更するため、Discord の規約に反する可能性や、Discord/Vencord の更新で壊れる可能性があります。インストール中は Discord を閉じてください。
 
-## MVP Scope
+## 対応範囲
 
-- Manual install against a Discord `resources` directory.
-- Backup the current `app.asar` by renaming it to `app.mobile-status-backup.asar`.
-- Place this patcher's loader as the new `app.asar`.
-- By default, keep the backup as Discord's original app body. If Vencord is installed and `_app.asar` exists, the installer disables the Vencord loader layer and backs up `_app.asar` instead.
-- Prevent double install using `marker.json`.
-- Rewrite only Gateway `IDENTIFY` (`op: 2`) WebSocket payloads.
+- Discord の `resources` ディレクトリに対して手動またはスクリプトでインストールする
+- `app.asar` に自作 loader を置く
+- 公式 Discord のみの場合は、公式 `app.asar` を `_app.asar` に退避する
+- Vencord 形式の `_app.asar` がある場合は、Vencord loader を `app.vc.asar` に退避して Vencord を残す
+- 旧形式の `app.mobile-status-backup.asar` は移行用/フォールバック用として扱う
+- `marker.json` で二重インストールを防ぐ
+- WebSocket の Gateway `IDENTIFY` (`op: 2`) だけを書き換える
 
-No first-class uninstall command, GUI, or automatic updater is included.
+GUI、正式なアンインストーラー、自動更新機能はまだありません。
 
-## One-Step Install
+## インストール
 
-The installer opens an interactive prompt, lists detected Discord installs, lets you choose the install mode, closes the matching Discord process if requested, then installs the loader.
-
-No-clone install. These commands download the latest project archive into a temporary directory, run the installer, then delete the temporary files.
-
-Default install mode is `direct-discord`: `app.mobile-status-backup.asar` is kept as the original Discord app body, not Vencord or another client-mod loader. This keeps the runtime chain short and avoids leaving extra active layers. Vencord settings are not deleted; reinstall or repair Vencord later if you want it again.
-
-Set `DMI_NONINTERACTIVE=1` to skip prompts and use the selected branch plus `DMI_INSTALL_MODE` or the default mode.
+インストーラーは対話式です。検出した Discord を表示し、対象・モード・Discord を閉じるかどうかを確認してからパッチします。
 
 Windows PowerShell:
 
@@ -37,7 +32,7 @@ macOS:
 curl -fsSL https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-macos.sh | bash
 ```
 
-Pass `canary` or `ptb` when needed:
+Canary や PTB に当てる場合:
 
 ```powershell
 $env:DMI_BRANCH = "canary"; powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-windows.ps1 | iex"; Remove-Item Env:\DMI_BRANCH
@@ -47,46 +42,47 @@ $env:DMI_BRANCH = "canary"; powershell -NoProfile -ExecutionPolicy Bypass -Comma
 curl -fsSL https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-macos.sh | bash -s -- canary
 ```
 
-To explicitly keep an existing loader layer such as Vencord active, set `DMI_INSTALL_MODE=preserve-existing`. This mode is best treated as experimental because Discord and Vencord updates can replace each other's `app.asar` chain.
-
-Windows PowerShell:
-
-```powershell
-$env:DMI_INSTALL_MODE = "preserve-existing"; powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-windows.ps1 | iex"; Remove-Item Env:\DMI_INSTALL_MODE
-```
-
-macOS:
+プロンプトなしで実行する場合は `DMI_NONINTERACTIVE=1` を使います。
 
 ```bash
-DMI_INSTALL_MODE=preserve-existing curl -fsSL https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-macos.sh | bash
+DMI_NONINTERACTIVE=1 curl -fsSL https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-macos.sh | bash
 ```
 
-Local checkout install:
+## インストールモード
 
-Windows PowerShell:
+既定は `auto` です。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
+- `auto`: 推奨。`_app.asar` があれば Vencord 形式として扱い、Vencord を残す
+- `direct-discord`: Vencord などの既存 loader を active chain から外し、Discord 本体に直接当てる
+- `preserve-existing`: 互換用。既存 loader を残す方向の別名
+
+Vencord を残す場合の最終形:
+
+```text
+app.asar      = 自作 mobile loader
+app.vc.asar   = Vencord loader
+_app.asar     = Discord 公式本体
 ```
 
-macOS:
+起動チェーン:
 
-```bash
-chmod +x ./scripts/install-macos.sh
-./scripts/install-macos.sh
+```text
+自作 mobile loader
+ -> app.vc.asar の Vencord loader
+ -> _app.asar の Discord 公式本体
 ```
 
-Both scripts default to Stable Discord. Pass `canary` or `ptb` to target another branch:
+公式 Discord のみの場合の最終形:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -Branch canary
+```text
+app.asar                       = 自作 mobile loader
+_app.asar                      = Discord 公式本体
+app.mobile-status-backup.asar  = フォールバック用の Discord 公式本体
 ```
 
-```bash
-./scripts/install-macos.sh canary
-```
+`app.mobile-status-backup.asar` は、後から Vencord を入れて `_app.asar` が自作 loader に置き換わった場合でも、公式本体へ辿れるように残します。
 
-## Manual Usage
+## ローカル実行
 
 ```bash
 npm install
@@ -94,46 +90,41 @@ node src/cli.mjs check --discord-path "C:\Users\you\AppData\Local\Discord\app-1.
 node src/cli.mjs install --discord-path "C:\Users\you\AppData\Local\Discord\app-1.0.x\resources"
 ```
 
-`--discord-path` must point to the `resources` directory that contains `app.asar`.
+`--discord-path` は `app.asar` が入っている `resources` ディレクトリを指定します。
 
-If you omit `--discord-path`, the CLI searches common Discord locations for the selected branch:
+自動検出を使う場合:
 
 ```bash
 node src/cli.mjs check --branch stable
 node src/cli.mjs check --branch canary
 node src/cli.mjs check --branch ptb
 node src/cli.mjs install --interactive
-node src/cli.mjs install --branch stable --force-close
+node src/cli.mjs install --branch stable --force-close --install-mode auto
 node src/cli.mjs install --branch stable --force-close --install-mode direct-discord
-node src/cli.mjs install --branch stable --force-close --install-mode preserve-existing
 ```
 
-## Safety Rules
+## 安全ルール
 
-- Existing `app.asar` is moved with `rename`, not copied and deleted.
-- `app.mobile-status-backup.asar` is not overwritten during normal repeated installs. In default `direct-discord` mode, a Vencord-style chain with `_app.asar` is normalized so this backup contains Discord's original app body.
-- In default `direct-discord` mode, if `_app.asar` exists, it is treated as Discord's original app body and moved to `app.mobile-status-backup.asar`; the existing active loader layer is removed from the chain.
-- In `preserve-existing` mode, `_app.asar` and other existing patcher backup files are not touched.
-- If `app.asar` is already this loader, install is treated as already complete.
-- If backup exists but `app.asar` is not this loader, install aborts to avoid destroying the previous layer.
-- The one-step scripts pass `--force-close`, so matching Discord processes are terminated before `app.asar` is renamed.
+- `app.asar` は基本的に `rename` で退避する
+- `Local Storage`、`IndexedDB`、`Cookies`、`Local State` などログイン情報は触らない
+- `_app.asar` がある場合、既定では Vencord 形式として扱う
+- `app.asar` がすでに自作 loader の場合はインストール済みとして扱う
+- `app.mobile-status-backup.asar` は旧インストールの移行とフォールバックに使う
+- ワンステップスクリプトは `--force-close` を渡すため、対象 Discord プロセスを閉じてから ASAR を動かす
 
-## Vencord Compatibility
+## Vencord との関係
 
-Vencord's installer is available for Windows and macOS and writes its own `app.asar` loader. The current Vencord installer source creates a minimal ASAR whose `index.js` requires the downloaded Vencord patcher, and the Vencord download page documents Windows and macOS installers.
+Vencord は `app.asar` に小さい loader を置き、元のアプリを `_app.asar` に退避して読み込みます。
 
-This patcher supports two modes:
+このパッチャーの `auto` モードでは、Vencord の `app.asar` を `app.vc.asar` に移動してから、自作 loader を `app.asar` に置きます。これにより Vencord と mobile patch の両方を active chain に残します。
 
-- `direct-discord` (default): disables the active Vencord loader layer and patches Discord directly. Backup contains only Discord's original app body. This is the least surprising production mode.
-- `preserve-existing`: installs this loader in front of the existing `app.asar`, so the chain can become `mobile loader -> Vencord loader -> Discord body`. This can work, but updates or repair tools from either side may break the chain.
+Vencord を後から入れた場合、Vencord が自作 `app.asar` を `_app.asar` に退避することがあります。その場合でも、自作 loader は `app.mobile-status-backup.asar` をフォールバックとして読みます。
 
-If Vencord is needed again after `direct-discord`, run Vencord's installer repair/reinstall. User Vencord settings under the user's application data directory are not removed by this patcher.
-
-## Development
+## 開発
 
 ```bash
 npm install
 npm test
 ```
 
-See [docs/design.md](docs/design.md) for the design source.
+設計メモは [docs/design.md](docs/design.md) を参照してください。

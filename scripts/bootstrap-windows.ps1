@@ -19,11 +19,11 @@ if ([string]::IsNullOrWhiteSpace($Ref)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($InstallMode)) {
-  $InstallMode = "direct-discord"
+  $InstallMode = "auto"
 }
 
-if (@("preserve-existing", "direct-discord") -notcontains $InstallMode) {
-  throw "Invalid install mode '$InstallMode'. Use preserve-existing or direct-discord."
+if (@("auto", "preserve-existing", "direct-discord") -notcontains $InstallMode) {
+  throw "Invalid install mode '$InstallMode'. Use auto, preserve-existing, or direct-discord."
 }
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {

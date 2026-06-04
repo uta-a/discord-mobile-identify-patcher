@@ -1,5 +1,11 @@
 import path from "node:path";
-import { APP_ASAR_NAME, BACKUP_ASAR_NAME, LEGACY_BACKUP_ASAR_NAME } from "../config.mjs";
+import {
+  APP_ASAR_NAME,
+  BACKUP_ASAR_NAME,
+  DISCORD_BODY_ASAR_NAME,
+  LEGACY_BACKUP_ASAR_NAME,
+  VENCORD_LOADER_ASAR_NAME
+} from "../config.mjs";
 
 export function getAppAsarPath(resourcesDir) {
   return path.join(resourcesDir, APP_ASAR_NAME);
@@ -11,4 +17,12 @@ export function getBackupAsarPath(resourcesDir) {
 
 export function getLegacyBackupAsarPath(resourcesDir) {
   return path.join(resourcesDir, LEGACY_BACKUP_ASAR_NAME);
+}
+
+export function getDiscordBodyAsarPath(resourcesDir) {
+  return path.join(resourcesDir, DISCORD_BODY_ASAR_NAME);
+}
+
+export function getVencordLoaderAsarPath(resourcesDir) {
+  return path.join(resourcesDir, VENCORD_LOADER_ASAR_NAME);
 }

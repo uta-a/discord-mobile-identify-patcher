@@ -147,15 +147,18 @@ function formatStateSummary(state) {
 
 async function promptInstallMode(rl, output, installTarget) {
   output.write("\nInstall mode:\n");
-  output.write("  1. direct-discord (recommended) - backup Discord body only; disable active Vencord-like loader layer\n");
-  output.write("  2. preserve-existing - keep existing loader layer active; experimental\n");
+  output.write("  1. auto (recommended) - preserve Vencord via app.vc.asar when _app.asar exists\n");
+  output.write("  2. direct-discord - disable active Vencord-like loader layer\n");
+  output.write("  3. preserve-existing - compatibility alias for preserving the existing layer\n");
 
   if (installTarget.state.hasVencordStyleBody) {
-    output.write("\nVencord-style _app.asar was detected. direct-discord will use _app.asar as the official Discord backup.\n");
+    output.write("\nVencord-style _app.asar was detected. auto will move app.asar to app.vc.asar and keep _app.asar as the Discord body.\n");
   }
 
-  const selected = await promptNumber(rl, "Select mode", 1, 1, 2);
-  return selected === 1 ? "direct-discord" : "preserve-existing";
+  const selected = await promptNumber(rl, "Select mode", 1, 1, 3);
+  if (selected === 2) return "direct-discord";
+  if (selected === 3) return "preserve-existing";
+  return "auto";
 }
 
 async function promptRequired(rl, label) {
@@ -219,7 +222,7 @@ function parseArgs(argv) {
     branchProvided: false,
     discordPath: null,
     forceClose: false,
-    installMode: process.env.DMI_INSTALL_MODE || "direct-discord",
+    installMode: process.env.DMI_INSTALL_MODE || "auto",
     installModeProvided: Boolean(process.env.DMI_INSTALL_MODE),
     interactive: false
   };
@@ -274,7 +277,7 @@ function requireValue(args, index, option) {
 function printUsage() {
   console.log(`Usage:
   node src/cli.mjs check [--branch stable|canary|ptb] [--discord-path <resources>]
-  node src/cli.mjs install [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close] [--install-mode preserve-existing|direct-discord] [--interactive]`);
+  node src/cli.mjs install [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close] [--install-mode auto|preserve-existing|direct-discord] [--interactive]`);
 }
 
 main(process.argv.slice(2)).catch((error) => {

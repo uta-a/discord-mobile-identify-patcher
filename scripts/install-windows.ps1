@@ -2,7 +2,7 @@ param(
   [ValidateSet("stable", "canary", "ptb")]
   [string]$Branch = "stable",
 
-  [ValidateSet("preserve-existing", "direct-discord")]
+  [ValidateSet("auto", "preserve-existing", "direct-discord")]
   [string]$InstallMode = $env:DMI_INSTALL_MODE,
 
   [switch]$NonInteractive
@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($InstallMode)) {
-  $InstallMode = "direct-discord"
+  $InstallMode = "auto"
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path

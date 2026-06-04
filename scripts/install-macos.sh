@@ -2,7 +2,7 @@
 set -euo pipefail
 
 branch="${1:-stable}"
-install_mode="${DMI_INSTALL_MODE:-direct-discord}"
+install_mode="${DMI_INSTALL_MODE:-auto}"
 case "$branch" in
   stable|canary|ptb) ;;
   *)
@@ -12,9 +12,9 @@ case "$branch" in
 esac
 
 case "$install_mode" in
-  preserve-existing|direct-discord) ;;
+  auto|preserve-existing|direct-discord) ;;
   *)
-    echo "DMI_INSTALL_MODE must be preserve-existing or direct-discord" >&2
+    echo "DMI_INSTALL_MODE must be auto, preserve-existing, or direct-discord" >&2
     exit 2
     ;;
 esac
