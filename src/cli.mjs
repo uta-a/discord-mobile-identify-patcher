@@ -5,13 +5,17 @@ import { stdin as processStdin, stdout as processStdout } from "node:process";
 import path from "node:path";
 import { findDiscordResourcesPath, getCandidateResourcesPaths } from "./detect/platformPaths.mjs";
 import { evaluateInstallState } from "./install/guard.mjs";
-import { installToResources } from "./install/install.mjs";
+import {
+  installToResources,
+  uninstallSelfFromResources,
+  uninstallVencordLayerFromResources
+} from "./install/install.mjs";
 import { pathExists } from "./utils/fileOps.mjs";
 
 async function main(argv) {
   const { command, options } = parseArgs(argv);
 
-  if (!["check", "install"].includes(command)) {
+  if (!["check", "install", "uninstall-self", "uninstall-vencord-layer"].includes(command)) {
     printUsage();
     process.exitCode = 1;
     return;
@@ -34,11 +38,29 @@ async function main(argv) {
     return;
   }
 
-  const result = await installToResources(resourcesDir, {
-    forceClose: options.forceClose,
-    installMode: options.installMode
-  });
-  console.log(JSON.stringify(result, null, 2));
+  if (command === "install") {
+    const result = await installToResources(resourcesDir, {
+      forceClose: options.forceClose,
+      installMode: options.installMode
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "uninstall-self") {
+    const result = await uninstallSelfFromResources(resourcesDir, {
+      forceClose: options.forceClose
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "uninstall-vencord-layer") {
+    const result = await uninstallVencordLayerFromResources(resourcesDir, {
+      forceClose: options.forceClose
+    });
+    console.log(JSON.stringify(result, null, 2));
+  }
 }
 
 async function runInteractiveInstall(options) {
@@ -277,7 +299,9 @@ function requireValue(args, index, option) {
 function printUsage() {
   console.log(`Usage:
   node src/cli.mjs check [--branch stable|canary|ptb] [--discord-path <resources>]
-  node src/cli.mjs install [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close] [--install-mode auto|preserve-existing|direct-discord] [--interactive]`);
+  node src/cli.mjs install [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close] [--install-mode auto|preserve-existing|direct-discord] [--interactive]
+  node src/cli.mjs uninstall-self [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close]
+  node src/cli.mjs uninstall-vencord-layer [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close]`);
 }
 
 main(process.argv.slice(2)).catch((error) => {

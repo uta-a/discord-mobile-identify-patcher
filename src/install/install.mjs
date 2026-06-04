@@ -30,16 +30,16 @@ export async function installToResources(
     await assertDiscordNotRunning(resourcesDir);
   }
 
-  if (installMode === "direct-discord" && (await exists(getDiscordBodyAsarPath(resourcesDir)))) {
-    return installDirectDiscord(resourcesDir, { closedProcesses });
+  const state = await evaluateInstallState(resourcesDir);
+
+  if (installMode === "direct-discord") {
+    return installDirectDiscordMode(resourcesDir, { closedProcesses, state });
   }
 
   if ((installMode === "auto" || installMode === "preserve-existing")
     && (await exists(getDiscordBodyAsarPath(resourcesDir)))) {
     return installVencordChain(resourcesDir, { closedProcesses, installMode: "vencord-chain" });
   }
-
-  const state = await evaluateInstallState(resourcesDir);
 
   if (state.action === "already-installed") {
     return repairExistingInstall(resourcesDir, { closedProcesses, state });
@@ -49,6 +49,42 @@ export async function installToResources(
     throw new Error(state.reason ?? "install guard failed");
   }
 
+  return installFreshOfficial(resourcesDir, { closedProcesses });
+}
+
+async function installDirectDiscordMode(resourcesDir, { closedProcesses, state }) {
+  if (state.state === "vencord-only") {
+    return installDirectDiscord(resourcesDir, { closedProcesses });
+  }
+
+  if (state.state === "mobile-then-vencord") {
+    return uninstallVencordLayerFromResources(resourcesDir, {
+      skipProcessCheck: true
+    });
+  }
+
+  if (state.state === "vencord-then-mobile") {
+    await removeWithBusyRetry(getVencordLoaderAsarPath(resourcesDir));
+    const result = await repairActiveLoader(resourcesDir, { closedProcesses, state });
+    return { ...result, removedVencordLayer: true };
+  }
+
+  if (state.alreadyInstalled) {
+    return repairActiveLoader(resourcesDir, { closedProcesses, state });
+  }
+
+  if (await exists(getDiscordBodyAsarPath(resourcesDir))) {
+    return installDirectDiscord(resourcesDir, { closedProcesses });
+  }
+
+  if (state.action !== "install") {
+    throw new Error(state.reason ?? "install guard failed");
+  }
+
+  return installFreshOfficial(resourcesDir, { closedProcesses });
+}
+
+async function installFreshOfficial(resourcesDir, { closedProcesses }) {
   const appAsar = getAppAsarPath(resourcesDir);
   const backupAsar = getDiscordBodyAsarPath(resourcesDir);
   const originalHash = await sha256File(appAsar);
@@ -102,6 +138,100 @@ export async function installToResources(
 
     throw error;
   }
+}
+
+export async function uninstallSelfFromResources(
+  resourcesDir,
+  { forceClose = false, skipProcessCheck = false } = {}
+) {
+  const closedProcesses = await prepareForAsarChanges(resourcesDir, { forceClose, skipProcessCheck });
+  const state = await evaluateInstallState(resourcesDir);
+  const appAsar = getAppAsarPath(resourcesDir);
+  const discordBodyAsar = getDiscordBodyAsarPath(resourcesDir);
+  const backupAsar = getBackupAsarPath(resourcesDir);
+  const vencordLoaderAsar = getVencordLoaderAsarPath(resourcesDir);
+
+  if (!state.canUninstallSelf) {
+    throw new Error(`self layer is not installed in current state: ${state.state}`);
+  }
+
+  if (state.state === "mobile-only") {
+    const officialSource = await exists(discordBodyAsar) ? discordBodyAsar : backupAsar;
+    if (!(await exists(officialSource))) {
+      throw new Error("official Discord body was not found for uninstall-self");
+    }
+
+    await removeWithBusyRetry(appAsar);
+    await renameWithBusyRetry(officialSource, appAsar);
+    await removeWithBusyRetry(backupAsar);
+    return { uninstalled: true, command: "uninstall-self", state: state.state, closedProcesses };
+  }
+
+  if (state.state === "vencord-then-mobile") {
+    await removeWithBusyRetry(appAsar);
+    await renameWithBusyRetry(vencordLoaderAsar, appAsar);
+    await removeWithBusyRetry(backupAsar);
+    return { uninstalled: true, command: "uninstall-self", state: state.state, closedProcesses };
+  }
+
+  if (state.state === "mobile-then-vencord") {
+    await removeWithBusyRetry(discordBodyAsar);
+    await renameWithBusyRetry(backupAsar, discordBodyAsar);
+    return { uninstalled: true, command: "uninstall-self", state: state.state, closedProcesses };
+  }
+
+  throw new Error(`unsupported uninstall-self state: ${state.state}`);
+}
+
+export async function uninstallVencordLayerFromResources(
+  resourcesDir,
+  { forceClose = false, skipProcessCheck = false } = {}
+) {
+  const closedProcesses = await prepareForAsarChanges(resourcesDir, { forceClose, skipProcessCheck });
+  const state = await evaluateInstallState(resourcesDir);
+  const appAsar = getAppAsarPath(resourcesDir);
+  const discordBodyAsar = getDiscordBodyAsarPath(resourcesDir);
+  const backupAsar = getBackupAsarPath(resourcesDir);
+  const vencordLoaderAsar = getVencordLoaderAsarPath(resourcesDir);
+
+  if (!state.canUninstallVencordLayer) {
+    throw new Error(`Vencord layer is not installed in current state: ${state.state}`);
+  }
+
+  if (state.state === "vencord-only") {
+    await removeWithBusyRetry(appAsar);
+    await renameWithBusyRetry(discordBodyAsar, appAsar);
+    return { uninstalled: true, command: "uninstall-vencord-layer", state: state.state, closedProcesses };
+  }
+
+  if (state.state === "vencord-then-mobile") {
+    await removeWithBusyRetry(vencordLoaderAsar);
+    return { uninstalled: true, command: "uninstall-vencord-layer", state: state.state, closedProcesses };
+  }
+
+  if (state.state === "mobile-then-vencord") {
+    await removeWithBusyRetry(appAsar);
+    await renameWithBusyRetry(discordBodyAsar, appAsar);
+    if (!(await exists(discordBodyAsar))) {
+      await fs.copyFile(backupAsar, discordBodyAsar);
+    }
+    return { uninstalled: true, command: "uninstall-vencord-layer", state: state.state, closedProcesses };
+  }
+
+  throw new Error(`unsupported uninstall-vencord-layer state: ${state.state}`);
+}
+
+async function prepareForAsarChanges(resourcesDir, { forceClose, skipProcessCheck }) {
+  if (forceClose) {
+    const closeResult = await closeDiscordForInstall(resourcesDir);
+    return closeResult.processes;
+  }
+
+  if (!skipProcessCheck) {
+    await assertDiscordNotRunning(resourcesDir);
+  }
+
+  return [];
 }
 
 async function installDirectDiscord(resourcesDir, { closedProcesses }) {
@@ -174,7 +304,10 @@ async function installVencordChain(resourcesDir, { closedProcesses, installMode 
   );
 
   if (await isOurLoader(appAsar)) {
-    return { installed: false, alreadyInstalled: true, repaired: false, closedProcesses };
+    return repairActiveLoader(resourcesDir, {
+      closedProcesses,
+      state: await evaluateInstallState(resourcesDir)
+    });
   }
 
   const normalizedExistingMobileLoader = await isOurLoader(discordBodyAsar);
@@ -264,6 +397,40 @@ async function repairExistingInstall(resourcesDir, { closedProcesses, state }) {
       appAsar,
       backupAsar,
       migratedLegacyBackup: false,
+      closedProcesses,
+      state
+    };
+  } catch (error) {
+    await fs.rm(tempLoaderAsar, { force: true });
+    throw error;
+  }
+}
+
+async function repairActiveLoader(resourcesDir, { closedProcesses, state }) {
+  const appAsar = getAppAsarPath(resourcesDir);
+  const tempLoaderAsar = path.join(
+    resourcesDir,
+    `.app.asar.mobile-identify-loader-${process.pid}-${Date.now()}.tmp`
+  );
+
+  await buildLoaderAsar(tempLoaderAsar);
+  if (!(await isOurLoader(tempLoaderAsar))) {
+    throw new Error(`built loader marker verification failed: ${tempLoaderAsar}`);
+  }
+
+  try {
+    await removeWithBusyRetry(appAsar);
+    await renameWithBusyRetry(tempLoaderAsar, appAsar);
+
+    if (!(await isOurLoader(appAsar))) {
+      throw new Error("repaired app.asar marker verification failed");
+    }
+
+    return {
+      installed: false,
+      alreadyInstalled: true,
+      repaired: true,
+      appAsar,
       closedProcesses,
       state
     };

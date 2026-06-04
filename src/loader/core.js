@@ -74,11 +74,15 @@ function getNextAppPlan(resourcesPath, loaderDir = __dirname, fsModule = fs) {
   }
 
   const fallbackDiscordAsar = path.join(resourcesPath, "app.dmi.asar");
-  if (loaderDir.endsWith("_app.asar") && fsModule.existsSync(fallbackDiscordAsar)) {
-    return { nextAsar: fallbackDiscordAsar, shouldPatch: false };
+  const discordBodyAsar = path.join(resourcesPath, "_app.asar");
+  if (
+    fsModule.existsSync(fallbackDiscordAsar)
+    && (loaderDir.endsWith("_app.asar") || !fsModule.existsSync(discordBodyAsar))
+  ) {
+    return { nextAsar: fallbackDiscordAsar, shouldPatch: true };
   }
 
-  return { nextAsar: path.join(resourcesPath, "_app.asar"), shouldPatch: true };
+  return { nextAsar: discordBodyAsar, shouldPatch: true };
 }
 
 module.exports = {

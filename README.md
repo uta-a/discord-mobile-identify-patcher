@@ -80,7 +80,7 @@ _app.asar                      = Discord 公式本体
 app.dmi.asar                   = フォールバック用の Discord 公式本体
 ```
 
-`app.dmi.asar` は、後から Vencord を入れて `_app.asar` が自作 loader に置き換わった場合でも、公式本体へ辿れるように残します。この経路では自作 loader は mobile patch を注入せず、公式本体だけを読みます。
+`app.dmi.asar` は、後から Vencord を入れて `_app.asar` が自作 loader に置き換わった場合でも、公式本体へ辿れるように残します。この経路でも自作 loader は mobile patch を注入します。
 
 ## ローカル実行
 
@@ -118,7 +118,7 @@ Vencord は `app.asar` に小さい loader を置き、元のアプリを `_app.
 
 このパッチャーの `auto` モードでは、Vencord の `app.asar` を `app.vc.asar` に移動してから、自作 loader を `app.asar` に置きます。これにより Vencord と mobile patch の両方を active chain に残します。
 
-Vencord を後から入れた場合、Vencord が自作 `app.asar` を `_app.asar` に退避することがあります。その場合、自作 loader は `app.dmi.asar` をフォールバックとして読みますが、mobile patch は注入しません。
+Vencord を後から入れた場合、Vencord が自作 `app.asar` を `_app.asar` に退避することがあります。その場合、自作 loader は `app.dmi.asar` をフォールバックとして読み、mobile patch も注入します。
 
 ## 開発
 

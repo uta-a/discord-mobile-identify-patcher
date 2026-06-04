@@ -10,7 +10,11 @@ import {
   VENCORD_LOADER_ASAR_NAME
 } from "../src/config.mjs";
 import { buildLoaderAsar } from "../src/install/buildLoaderAsar.mjs";
-import { installToResources } from "../src/install/install.mjs";
+import {
+  installToResources,
+  uninstallSelfFromResources,
+  uninstallVencordLayerFromResources
+} from "../src/install/install.mjs";
 import { evaluateInstallState, isOurLoader } from "../src/install/guard.mjs";
 
 test("install renames current app.asar to backup and places loader", async () => {
@@ -60,6 +64,61 @@ test("direct-discord mode removes Vencord-like active layer and backs up Discord
   });
 });
 
+test("direct-discord mode repairs mobile-only instead of moving its Discord body away", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await buildLoaderAsar(path.join(resourcesDir, "app.asar"));
+    await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
+    await fs.writeFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "official fallback");
+
+    const result = await installToResources(resourcesDir, {
+      skipProcessCheck: true,
+      installMode: "direct-discord"
+    });
+
+    assert.equal(result.repaired, true);
+    assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
+    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "official fallback");
+  });
+});
+
+test("direct-discord mode removes Vencord from mobile-then-vencord without losing official body", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await writeVencordLoader(path.join(resourcesDir, "app.asar"));
+    await buildLoaderAsar(path.join(resourcesDir, "_app.asar"));
+    await fs.writeFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "official discord");
+
+    const result = await installToResources(resourcesDir, {
+      skipProcessCheck: true,
+      installMode: "direct-discord"
+    });
+
+    assert.equal(result.command, "uninstall-vencord-layer");
+    assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
+    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "official discord");
+  });
+});
+
+test("direct-discord mode removes Vencord from vencord-then-mobile without deleting Discord body", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await buildLoaderAsar(path.join(resourcesDir, "app.asar"));
+    await writeVencordLoader(path.join(resourcesDir, VENCORD_LOADER_ASAR_NAME));
+    await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
+
+    const result = await installToResources(resourcesDir, {
+      skipProcessCheck: true,
+      installMode: "direct-discord"
+    });
+
+    assert.equal(result.removedVencordLayer, true);
+    assert.equal(result.repaired, true);
+    assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
+    assert.equal(await pathExists(path.join(resourcesDir, VENCORD_LOADER_ASAR_NAME)), false);
+  });
+});
+
 test("default install mode backs up Discord body from Vencord-like _app.asar", async () => {
   await usingFixture(async (resourcesDir) => {
     await writeVencordLoader(path.join(resourcesDir, "app.asar"));
@@ -90,6 +149,82 @@ test("install normalizes Vencord after existing mobile loader install", async ()
   });
 });
 
+test("uninstall-self from mobile-only restores official app and removes fallback", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await buildLoaderAsar(path.join(resourcesDir, "app.asar"));
+    await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
+    await fs.writeFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "official discord");
+
+    const result = await uninstallSelfFromResources(resourcesDir, { skipProcessCheck: true });
+
+    assert.equal(result.uninstalled, true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "app.asar"), "utf8"), "official discord");
+    assert.equal(await pathExists(path.join(resourcesDir, BACKUP_ASAR_NAME)), false);
+  });
+});
+
+test("uninstall-self from vencord-then-mobile restores vencord-only", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await buildLoaderAsar(path.join(resourcesDir, "app.asar"));
+    await writeVencordLoader(path.join(resourcesDir, VENCORD_LOADER_ASAR_NAME));
+    await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
+    await fs.writeFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "official discord");
+
+    const result = await uninstallSelfFromResources(resourcesDir, { skipProcessCheck: true });
+
+    assert.equal(result.uninstalled, true);
+    assert.match(await readAsarText(path.join(resourcesDir, "app.asar"), "index.js"), /Vencord/);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
+    assert.equal(await pathExists(path.join(resourcesDir, VENCORD_LOADER_ASAR_NAME)), false);
+    assert.equal(await pathExists(path.join(resourcesDir, BACKUP_ASAR_NAME)), false);
+  });
+});
+
+test("uninstall-self from mobile-then-vencord restores vencord-only", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await writeVencordLoader(path.join(resourcesDir, "app.asar"));
+    await buildLoaderAsar(path.join(resourcesDir, "_app.asar"));
+    await fs.writeFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "official discord");
+
+    const result = await uninstallSelfFromResources(resourcesDir, { skipProcessCheck: true });
+
+    assert.equal(result.uninstalled, true);
+    assert.match(await readAsarText(path.join(resourcesDir, "app.asar"), "index.js"), /Vencord/);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
+    assert.equal(await pathExists(path.join(resourcesDir, BACKUP_ASAR_NAME)), false);
+  });
+});
+
+test("uninstall-vencord-layer from vencord-then-mobile restores mobile-only", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await buildLoaderAsar(path.join(resourcesDir, "app.asar"));
+    await writeVencordLoader(path.join(resourcesDir, VENCORD_LOADER_ASAR_NAME));
+    await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
+
+    const result = await uninstallVencordLayerFromResources(resourcesDir, { skipProcessCheck: true });
+
+    assert.equal(result.uninstalled, true);
+    assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
+    assert.equal(await pathExists(path.join(resourcesDir, VENCORD_LOADER_ASAR_NAME)), false);
+  });
+});
+
+test("uninstall-vencord-layer from mobile-then-vencord restores mobile-only", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await writeVencordLoader(path.join(resourcesDir, "app.asar"));
+    await buildLoaderAsar(path.join(resourcesDir, "_app.asar"));
+    await fs.writeFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "official discord");
+
+    const result = await uninstallVencordLayerFromResources(resourcesDir, { skipProcessCheck: true });
+
+    assert.equal(result.uninstalled, true);
+    assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
+    assert.equal(await fs.readFile(path.join(resourcesDir, BACKUP_ASAR_NAME), "utf8"), "official discord");
+  });
+});
+
 test("second install does not overwrite backup", async () => {
   await usingFixture(async (resourcesDir) => {
     await fs.writeFile(path.join(resourcesDir, "app.asar"), "official");
@@ -100,6 +235,20 @@ test("second install does not overwrite backup", async () => {
 
     assert.equal(second.alreadyInstalled, true);
     assert.equal(await fs.readFile(path.join(resourcesDir, DISCORD_BODY_ASAR_NAME), "utf8"), firstBackup);
+  });
+});
+
+test("reinstall repairs active mobile loader when _app.asar exists without app.dmi.asar", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await buildLoaderAsar(path.join(resourcesDir, "app.asar"));
+    await fs.writeFile(path.join(resourcesDir, "_app.asar"), "official discord");
+
+    const result = await installToResources(resourcesDir, { skipProcessCheck: true });
+
+    assert.equal(result.alreadyInstalled, true);
+    assert.equal(result.repaired, true);
+    assert.equal(await isOurLoader(path.join(resourcesDir, "app.asar")), true);
+    assert.equal(await fs.readFile(path.join(resourcesDir, "_app.asar"), "utf8"), "official discord");
   });
 });
 

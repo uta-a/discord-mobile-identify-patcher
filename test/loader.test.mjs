@@ -79,13 +79,24 @@ test("loadNextApp requires the next layer package main", async () => {
   });
 });
 
-test("getNextAppPlan disables mobile patch when Vencord moved this loader to _app.asar", async () => {
+test("getNextAppPlan keeps mobile patch when Vencord moved this loader to _app.asar", async () => {
   await usingFixture(async (root) => {
     await fs.writeFile(path.join(root, "app.dmi.asar"), "official fallback");
 
     const plan = getNextAppPlan(root, path.join(root, "_app.asar"));
 
-    assert.equal(plan.shouldPatch, false);
+    assert.equal(plan.shouldPatch, true);
+    assert.equal(plan.nextAsar, path.join(root, "app.dmi.asar"));
+  });
+});
+
+test("getNextAppPlan uses app.dmi.asar when active mobile loader has no _app.asar", async () => {
+  await usingFixture(async (root) => {
+    await fs.writeFile(path.join(root, "app.dmi.asar"), "official fallback");
+
+    const plan = getNextAppPlan(root, path.join(root, "app.asar"));
+
+    assert.equal(plan.shouldPatch, true);
     assert.equal(plan.nextAsar, path.join(root, "app.dmi.asar"));
   });
 });
