@@ -64,11 +64,11 @@ export async function inspectDiscordAsar(appAsarPath) {
       return { kind: "dmi-patched", packageJson, mainFile };
     }
 
-    if (/Vencord/i.test(searchable) && /patcher\.js|vencord/i.test(searchable)) {
+    if (hasVencordLoaderSignature(searchable)) {
       return { kind: "vencord-loader", packageJson, mainFile };
     }
 
-    if (/BetterDiscord|OpenAsar|_app\.asar|app\.vc\.asar|app\.dmi\.asar|patcher\.js/i.test(searchable)) {
+    if (hasThirdPartyLoaderSignature(searchable)) {
       return { kind: "third-party-loader", packageJson, mainFile };
     }
 
@@ -84,6 +84,15 @@ export async function inspectDiscordAsar(appAsarPath) {
 
 export async function isDmiPatchedAsar(appAsarPath) {
   return (await inspectDiscordAsar(appAsarPath)).kind === "dmi-patched";
+}
+
+function hasVencordLoaderSignature(source) {
+  return /(?:require|import)\s*\(\s*["'`][^"'`]*(?:Vencord|vencord)[^"'`]*patcher\.js/i.test(source);
+}
+
+function hasThirdPartyLoaderSignature(source) {
+  return /OpenAsar|_app\.asar|app\.vc\.asar|app\.dmi\.asar/i.test(source)
+    || /(?:require|import)\s*\(\s*["'`][^"'`]*(?:BetterDiscord|patcher\.js)[^"'`]*/i.test(source);
 }
 
 function createDirectMainSource(originalMain) {

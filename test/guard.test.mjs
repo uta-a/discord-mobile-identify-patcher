@@ -24,6 +24,19 @@ test("evaluateInstallState allows install for official-only", async () => {
   });
 });
 
+test("evaluateInstallState does not treat official denylist text as Vencord", async () => {
+  await usingFixture(async (resourcesDir) => {
+    await writeOfficialDiscordAsar(path.join(resourcesDir, "app.asar"), {
+      body: 'const ignoreErrors = ["BetterDiscord", "VencordPatcher"];\n'
+    });
+
+    const state = await evaluateInstallState(resourcesDir);
+
+    assert.equal(state.state, "official-only");
+    assert.equal(state.canInstall, true);
+  });
+});
+
 test("evaluateInstallState classifies dmi-only", async () => {
   await usingFixture(async (resourcesDir) => {
     await writeOfficialDiscordAsar(path.join(resourcesDir, "app.asar"));
@@ -111,11 +124,11 @@ async function usingFixture(callback) {
   }
 }
 
-async function writeOfficialDiscordAsar(outputPath) {
+async function writeOfficialDiscordAsar(outputPath, { body = "module.exports = {};\n" } = {}) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "official-discord-"));
   try {
     await fs.writeFile(path.join(tempDir, "package.json"), JSON.stringify({ name: "discord", main: "index.js" }));
-    await fs.writeFile(path.join(tempDir, "index.js"), "module.exports = {};\n");
+    await fs.writeFile(path.join(tempDir, "index.js"), body);
     await asar.createPackage(tempDir, outputPath);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
