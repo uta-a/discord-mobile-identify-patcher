@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
 import * as readline from "node:readline";
 import * as tty from "node:tty";
 import { createInterface } from "node:readline/promises";
@@ -39,7 +41,9 @@ async function main(argv) {
 
   if (command === "check" || command === "doctor") {
     const state = await evaluateInstallState(resourcesDir);
-    console.log(JSON.stringify({ branch: options.branch, version: getInstallVersion(resourcesDir), resourcesDir, ...state }, null, 2));
+    const payload = { branch: options.branch, version: getInstallVersion(resourcesDir), resourcesDir, ...state };
+    await writeCliLog(resourcesDir, command, payload);
+    printResult(command, payload, { json: options.json });
     process.exitCode = state.action === "abort" ? 1 : 0;
     return;
   }
@@ -48,7 +52,9 @@ async function main(argv) {
     const result = await installToResources(resourcesDir, {
       forceClose: options.forceClose
     });
-    console.log(JSON.stringify(withInstallMetadata(result, resourcesDir, options.branch), null, 2));
+    const payload = withInstallMetadata(result, resourcesDir, options.branch);
+    await writeCliLog(resourcesDir, command, payload);
+    printResult(command, payload, { json: options.json });
     return;
   }
 
@@ -56,7 +62,9 @@ async function main(argv) {
     const result = await uninstallSelfFromResources(resourcesDir, {
       forceClose: options.forceClose
     });
-    console.log(JSON.stringify(withInstallMetadata(result, resourcesDir, options.branch), null, 2));
+    const payload = withInstallMetadata(result, resourcesDir, options.branch);
+    await writeCliLog(resourcesDir, command, payload);
+    printResult(command, payload, { json: options.json });
     return;
   }
 }
@@ -94,7 +102,9 @@ async function runInteractiveInstall(options) {
     const result = await installToResources(installTarget.resourcesDir, {
       forceClose
     });
-    terminal.output.write(`${JSON.stringify(withInstallMetadata(result, installTarget.resourcesDir, installTarget.branch), null, 2)}\n`);
+    const payload = withInstallMetadata(result, installTarget.resourcesDir, installTarget.branch);
+    await writeCliLog(installTarget.resourcesDir, "install", payload);
+    terminal.output.write(`${formatSuccess("install", payload)}\n`);
   } finally {
     rl.close();
     terminal.close?.();
@@ -353,7 +363,8 @@ function parseArgs(argv) {
     branchProvided: false,
     discordPath: null,
     forceClose: false,
-    interactive: false
+    interactive: false,
+    json: false
   };
 
   for (let index = 0; index < rest.length; index += 1) {
@@ -382,6 +393,11 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === "--json") {
+      options.json = true;
+      continue;
+    }
+
     throw new Error(`Unknown option: ${arg}`);
   }
 
@@ -398,13 +414,140 @@ function requireValue(args, index, option) {
 
 function printUsage() {
   console.log(`Usage:
-  node src/cli.mjs check [--branch stable|canary|ptb] [--discord-path <resources>]
-  node src/cli.mjs doctor [--branch stable|canary|ptb] [--discord-path <resources>]
-  node src/cli.mjs install [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close] [--interactive]
-  node src/cli.mjs uninstall [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close]`);
+  node src/cli.mjs check [--branch stable|canary|ptb] [--discord-path <resources>] [--json]
+  node src/cli.mjs doctor [--branch stable|canary|ptb] [--discord-path <resources>] [--json]
+  node src/cli.mjs install [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close] [--interactive] [--json]
+  node src/cli.mjs uninstall [--branch stable|canary|ptb] [--discord-path <resources>] [--force-close] [--json]`);
 }
 
-main(process.argv.slice(2)).catch((error) => {
-  console.error(error.message);
+async function writeCliLog(resourcesDir, command, payload) {
+  const logDir = getCliLogDir(resourcesDir, payload?.branch);
+  await fsp.mkdir(logDir, { recursive: true });
+  const logFile = path.join(logDir, "install.log");
+  const entry = {
+    timestamp: new Date().toISOString(),
+    command,
+    ...payload
+  };
+  await fsp.appendFile(logFile, `${JSON.stringify(entry)}\n`, "utf8");
+}
+
+function getCliLogDir(resourcesDir, branch = "stable") {
+  if (process.env.DMI_LOG_DIR) {
+    return process.env.DMI_LOG_DIR;
+  }
+
+  return path.join(getDiscordUserDataDir(resourcesDir, branch), "mobile-identify-patcher");
+}
+
+function getDiscordUserDataDir(resourcesDir, branch = "stable") {
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", getDiscordUserDataName(branch));
+  }
+
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
+    return path.join(appData, getDiscordUserDataName(branch));
+  }
+
+  return path.join(os.homedir(), ".config", getDiscordUserDataName(branch));
+}
+
+function getDiscordUserDataName(branch) {
+  return {
+    stable: "discord",
+    canary: "discordcanary",
+    ptb: "discordptb"
+  }[branch] ?? "discord";
+}
+
+function printResult(command, payload, { json = false } = {}) {
+  if (json) {
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+
+  if (command === "check" || command === "doctor") {
+    if (payload.action === "abort") {
+      console.log(`Failed: ${simplifyReason(payload.reason, payload.state)}`);
+      return;
+    }
+
+    console.log(`Success: ${formatStateMessage(payload)}`);
+    return;
+  }
+
+  console.log(formatSuccess(command, payload));
+}
+
+function formatSuccess(command, payload) {
+  if (command === "install") {
+    if (payload.alreadyInstalled) return "Success: DMI is already installed.";
+    return "Success: DMI installed.";
+  }
+
+  if (command === "uninstall") {
+    return "Success: DMI uninstalled.";
+  }
+
+  return "Success.";
+}
+
+function formatStateMessage(payload) {
+  if (payload.state === "official-only") return "DMI can be installed.";
+  if (payload.state === "dmi-only") return "DMI is installed.";
+  return `state is ${payload.state}.`;
+}
+
+function simplifyReason(reason, state) {
+  if (!reason) return state ? `state is ${state}.` : "unknown reason.";
+  if (/clean official Discord app\.asar/i.test(reason)) {
+    return "Discord already has Vencord or another loader.";
+  }
+  if (/Uninstall Vencord first|installed under Vencord/i.test(reason)) {
+    return "Vencord is installed above DMI. Uninstall Vencord first.";
+  }
+  if (/not found/i.test(reason)) {
+    return "Discord app.asar was not found.";
+  }
+  if (/hash does not match/i.test(reason)) {
+    return "Discord files changed after DMI was installed.";
+  }
+  if (/inconsistent/i.test(reason)) {
+    return "DMI backup files are incomplete.";
+  }
+  return reason.split("\n")[0];
+}
+
+async function handleMainError(argv, error) {
+  let resourcesDir = null;
+  let branch = "stable";
+  let command = "unknown";
+
+  try {
+    const parsed = parseArgs(argv);
+    command = parsed.command;
+    branch = parsed.options.branch;
+    resourcesDir = parsed.options.discordPath ?? await findDiscordResourcesPath({ branch });
+  } catch {
+    // Argument parsing can be the failing operation. Keep the screen output simple.
+  }
+
+  try {
+    await writeCliLog(resourcesDir, command, {
+      branch,
+      resourcesDir,
+      error: {
+        message: error?.message ?? String(error),
+        stack: error?.stack
+      }
+    });
+  } catch {
+    // Logging must not hide the user-facing failure.
+  }
+
+  console.error(`Failed: ${simplifyReason(error?.message ?? String(error))}`);
   process.exitCode = 1;
-});
+}
+
+await main(process.argv.slice(2)).catch((error) => handleMainError(process.argv.slice(2), error));

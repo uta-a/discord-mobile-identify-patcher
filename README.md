@@ -120,6 +120,16 @@ node src/cli.mjs install --branch stable --force-close
 node src/cli.mjs uninstall --branch stable --force-close
 ```
 
+通常実行では画面に成功/失敗と短い理由だけを表示します。詳細な状態、hash、エラースタックなどは Discord のユーザーデータ配下にある `mobile-identify-patcher/install.log` に保存されます。
+
+macOS stable の例:
+
+```text
+~/Library/Application Support/discord/mobile-identify-patcher/install.log
+```
+
+詳細JSONを画面に出したい場合だけ `--json` を付けます。
+
 ローカルの OS 別スクリプトを使う場合:
 
 ```bash
