@@ -57,6 +57,8 @@ Windows PowerShell:
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/uta-a/discord-mobile-identify-patcher/main/scripts/bootstrap-windows.ps1 | iex"
 ```
 
+ブランチを指定しない場合は、検出できた Stable / Canary / PTB が選択肢に表示されます。
+
 macOS:
 
 ```bash

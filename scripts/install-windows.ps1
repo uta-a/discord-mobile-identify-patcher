@@ -1,11 +1,14 @@
 param(
-  [ValidateSet("stable", "canary", "ptb")]
-  [string]$Branch = "stable",
+  [string]$Branch = $env:DMI_BRANCH,
 
   [switch]$NonInteractive
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not [string]::IsNullOrWhiteSpace($Branch) -and @("stable", "canary", "ptb") -notcontains $Branch) {
+  throw "Invalid branch '$Branch'. Use stable, canary, or ptb."
+}
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
@@ -26,7 +29,11 @@ try {
     npm install
   }
 
-  $nodeArgs = @("src/cli.mjs", "install", "--branch", $Branch, "--force-close")
+  $nodeArgs = @("src/cli.mjs", "install", "--force-close")
+  if (-not [string]::IsNullOrWhiteSpace($Branch)) {
+    $nodeArgs += @("--branch", $Branch)
+  }
+
   if (-not $NonInteractive -and $env:DMI_NONINTERACTIVE -ne "1") {
     $nodeArgs += "--interactive"
   }

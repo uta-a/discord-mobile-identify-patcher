@@ -47,6 +47,17 @@ test("README documents one-step install and uninstall commands", async () => {
   assert.match(readme, /Vencord uninstall/);
 });
 
+test("install scripts leave branch unfiltered by default", async () => {
+  const macInstall = await fs.readFile(path.join(root, "scripts/install-macos.sh"), "utf8");
+  const winInstall = await fs.readFile(path.join(root, "scripts/install-windows.ps1"), "utf8");
+  const winBootstrap = await fs.readFile(path.join(root, "scripts/bootstrap-windows.ps1"), "utf8");
+
+  assert.match(macInstall, /branch="\$\{1:-\$\{DMI_BRANCH:-\}\}"/);
+  assert.match(macInstall, /node_args=\(src\/cli\.mjs install --force-close\)/);
+  assert.match(winInstall, /\$nodeArgs = @\("src\/cli\.mjs", "install", "--force-close"\)/);
+  assert.match(winBootstrap, /\$installArgs = @\(\)/);
+});
+
 test("CLI help exits successfully", async () => {
   const { stdout } = await execFileAsync(process.execPath, ["src/cli.mjs", "--help"], {
     cwd: root

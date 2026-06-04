@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-branch="${1:-stable}"
+branch="${1:-${DMI_BRANCH:-}}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -30,13 +30,15 @@ log_file() {
   printf '%s/install.log' "$data_dir"
 }
 
-case "$branch" in
-  stable|canary|ptb) ;;
-  *)
+if [ -n "$branch" ]; then
+  case "$branch" in
+    stable|canary|ptb) ;;
+    *)
     echo "Usage: $0 [stable|canary|ptb]" >&2
     exit 2
     ;;
-esac
+  esac
+fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
@@ -59,4 +61,9 @@ if [ "${DMI_NONINTERACTIVE:-0}" != "1" ]; then
   interactive_args+=(--interactive)
 fi
 
-node src/cli.mjs install --branch "$branch" --force-close "${interactive_args[@]}"
+node_args=(src/cli.mjs install --force-close)
+if [ -n "$branch" ]; then
+  node_args+=(--branch "$branch")
+fi
+
+node "${node_args[@]}" "${interactive_args[@]}"

@@ -5,11 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ([string]::IsNullOrWhiteSpace($Branch)) {
-  $Branch = "stable"
-}
-
-if (@("stable", "canary", "ptb") -notcontains $Branch) {
+if (-not [string]::IsNullOrWhiteSpace($Branch) -and @("stable", "canary", "ptb") -notcontains $Branch) {
   throw "Invalid branch '$Branch'. Use stable, canary, or ptb."
 }
 
@@ -59,7 +55,12 @@ try {
     throw "Downloaded archive did not contain a project directory."
   }
 
-  & (Join-Path $repoRoot.FullName "scripts\install-windows.ps1") -Branch $Branch
+  $installArgs = @()
+  if (-not [string]::IsNullOrWhiteSpace($Branch)) {
+    $installArgs += @("-Branch", $Branch)
+  }
+
+  & (Join-Path $repoRoot.FullName "scripts\install-windows.ps1") @installArgs
 } finally {
   Set-Location $previousLocation
 

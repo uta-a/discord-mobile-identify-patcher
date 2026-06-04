@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-branch="${1:-${DMI_BRANCH:-stable}}"
+branch="${1:-${DMI_BRANCH:-}}"
 ref="${DMI_REF:-main}"
 
 require_command() {
@@ -23,13 +23,15 @@ download() {
   fi
 }
 
-case "$branch" in
-  stable|canary|ptb) ;;
-  *)
+if [ -n "$branch" ]; then
+  case "$branch" in
+    stable|canary|ptb) ;;
+    *)
     echo "Usage: $0 [stable|canary|ptb]" >&2
     exit 2
     ;;
-esac
+  esac
+fi
 
 require_command node
 require_command npm
@@ -55,4 +57,8 @@ if [ -z "$repo_root" ]; then
   exit 1
 fi
 
-bash "$repo_root/scripts/install-macos.sh" "$branch"
+if [ -n "$branch" ]; then
+  bash "$repo_root/scripts/install-macos.sh" "$branch"
+else
+  bash "$repo_root/scripts/install-macos.sh"
+fi
