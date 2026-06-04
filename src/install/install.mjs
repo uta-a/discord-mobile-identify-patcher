@@ -6,7 +6,6 @@ import {
   getAppAsarPath,
   getBackupAsarPath,
   getDiscordBodyAsarPath,
-  getLegacyBackupAsarPath,
   getVencordLoaderAsarPath
 } from "../utils/asarPaths.mjs";
 import { sha256File } from "../utils/hash.mjs";
@@ -166,7 +165,7 @@ async function installDirectDiscord(resourcesDir, { closedProcesses }) {
 async function installVencordChain(resourcesDir, { closedProcesses, installMode }) {
   const appAsar = getAppAsarPath(resourcesDir);
   const discordBodyAsar = getDiscordBodyAsarPath(resourcesDir);
-  const legacyBackupAsar = getBackupAsarPath(resourcesDir);
+  const backupAsar = getBackupAsarPath(resourcesDir);
   const vencordLoaderAsar = getVencordLoaderAsarPath(resourcesDir);
   const originalHash = await sha256File(appAsar);
   const tempLoaderAsar = path.join(
@@ -180,13 +179,13 @@ async function installVencordChain(resourcesDir, { closedProcesses, installMode 
 
   const normalizedExistingMobileLoader = await isOurLoader(discordBodyAsar);
   if (normalizedExistingMobileLoader) {
-    if (!(await exists(legacyBackupAsar))) {
+    if (!(await exists(backupAsar))) {
       throw new Error(
-        "_app.asar is already this loader, but app.mobile-status-backup.asar was not found; cannot recover Discord body"
+        "_app.asar is already this loader, but app.dmi.asar was not found; cannot recover Discord body"
       );
     }
     await removeWithBusyRetry(discordBodyAsar);
-    await renameWithBusyRetry(legacyBackupAsar, discordBodyAsar);
+    await renameWithBusyRetry(backupAsar, discordBodyAsar);
   }
 
   await buildLoaderAsar(tempLoaderAsar);
@@ -234,18 +233,12 @@ async function installVencordChain(resourcesDir, { closedProcesses, installMode 
 async function repairExistingInstall(resourcesDir, { closedProcesses, state }) {
   const appAsar = getAppAsarPath(resourcesDir);
   const backupAsar = getBackupAsarPath(resourcesDir);
-  const legacyBackupAsar = getLegacyBackupAsarPath(resourcesDir);
   const tempLoaderAsar = path.join(
     resourcesDir,
     `.app.asar.mobile-identify-loader-${process.pid}-${Date.now()}.tmp`
   );
 
   const backupExists = await exists(backupAsar);
-  const legacyBackupExists = await exists(legacyBackupAsar);
-
-  if (!backupExists && legacyBackupExists) {
-    await renameWithBusyRetry(legacyBackupAsar, backupAsar);
-  }
 
   if (!(await exists(backupAsar))) {
     return { installed: false, alreadyInstalled: true, repaired: false, closedProcesses, state };
@@ -270,7 +263,7 @@ async function repairExistingInstall(resourcesDir, { closedProcesses, state }) {
       repaired: true,
       appAsar,
       backupAsar,
-      migratedLegacyBackup: legacyBackupExists && !backupExists,
+      migratedLegacyBackup: false,
       closedProcesses,
       state
     };

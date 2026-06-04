@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import asar from "@electron/asar";
 import { LOADER_KIND } from "../config.mjs";
-import { getAppAsarPath, getBackupAsarPath, getLegacyBackupAsarPath } from "../utils/asarPaths.mjs";
+import { getAppAsarPath, getBackupAsarPath } from "../utils/asarPaths.mjs";
 import { pathExists } from "../utils/fileOps.mjs";
 
 export async function readMarker(appAsarPath) {
@@ -28,7 +28,6 @@ export async function isOurLoader(appAsarPath) {
 export async function evaluateInstallState(resourcesDir) {
   const appAsar = getAppAsarPath(resourcesDir);
   const backupAsar = getBackupAsarPath(resourcesDir);
-  const legacyBackupAsar = getLegacyBackupAsarPath(resourcesDir);
 
   if (!(await pathExists(appAsar))) {
     return {
@@ -46,7 +45,6 @@ export async function evaluateInstallState(resourcesDir) {
       canInstall: false,
       alreadyInstalled: true,
       backupExists: await pathExists(backupAsar),
-      legacyBackupExists: await pathExists(legacyBackupAsar),
       reason: null
     };
   }
